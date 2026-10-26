@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
+import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StudentCheckInSchema } from '@/lib/validation';
 import { 
   CheckCircle2, 
   AlertCircle, 
-  Clock, 
-  BookOpen, 
   ShieldCheck, 
-  ArrowRight,
-  Sparkles
+  ArrowRight
 } from 'lucide-react';
 
 export const StudentDashboard: React.FC = () => {

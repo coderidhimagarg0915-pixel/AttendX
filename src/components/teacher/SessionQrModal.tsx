@@ -1,7 +1,7 @@
 import React from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { QrCode, Copy, Check, Sparkles, ExternalLink } from 'lucide-react';
+import { QrCode, Copy, Check, ExternalLink } from 'lucide-react';
 import type { AttendanceSessionData } from '@/services/sessionService';
 
 interface SessionQrModalProps {

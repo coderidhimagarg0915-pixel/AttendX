@@ -5,11 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { 
   GraduationCap, 
   BookOpen, 
-  ShieldCheck, 
-  Users, 
   Sparkles, 
   ArrowRight,
-  Database,
   CheckCircle2,
   Lock
 } from 'lucide-react';

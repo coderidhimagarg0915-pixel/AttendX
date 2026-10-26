@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { AttendanceStatus, SessionState } from '@/types/attendance';
 
 export interface Course {
@@ -35,7 +35,7 @@ export interface StudentAttendee {
   verificationState: string;
   timestamp: string;
   method: string;
-  overrideReason?: string;
+  overrideReason?: string | undefined;
 }
 
 // Fallback Mock Courses
@@ -86,8 +86,12 @@ export const sessionService = {
    * Fetch courses taught by the faculty
    */
   async getCourses(): Promise<Course[]> {
+    if (!isSupabaseConfigured) {
+      return DEFAULT_COURSES;
+    }
+
     try {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('courses')
         .select('*');
 
@@ -95,7 +99,7 @@ export const sessionService = {
         return DEFAULT_COURSES;
       }
 
-      return data.map((c) => ({
+      return (data as any[]).map((c) => ({
         id: c.id,
         code: c.code,
         name: c.name,
@@ -124,13 +128,30 @@ export const sessionService = {
     const expiresAt = new Date(now.getTime() + params.expirationMinutes * 60 * 1000).toISOString();
     const sessionId = `sess-${Date.now()}`;
 
+    if (!isSupabaseConfigured) {
+      return {
+        id: sessionId,
+        courseId: params.courseId,
+        courseCode: params.courseCode,
+        courseName: params.courseName,
+        room: params.room,
+        title: params.title,
+        code,
+        state: 'active',
+        startTime: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        expiresAt,
+        enrolled: 48,
+        present: 0,
+      };
+    }
+
     try {
       const { data: userData } = await supabase.auth.getUser();
       const instructorId = userData?.user?.id;
 
       if (instructorId) {
         // Insert to Supabase attendance_sessions
-        const { data: sessionRow, error: sessionErr } = await supabase
+        const { data: sessionRow, error: sessionErr } = await (supabase as any)
           .from('attendance_sessions')
           .insert({
             course_id: params.courseId,
@@ -185,7 +206,7 @@ export const sessionService = {
    */
   async closeSession(sessionId: string): Promise<boolean> {
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('attendance_sessions')
         .update({ state: 'closed' })
         .eq('id', sessionId);

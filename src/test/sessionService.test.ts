@@ -68,7 +68,7 @@ describe('Teacher Session Engine', () => {
     it('returns default courses when database connection is inactive', async () => {
       const courses = await sessionService.getCourses();
       expect(courses.length).toBeGreaterThan(0);
-      expect(courses[0].code).toBe('CS301');
+      expect(courses[0]?.code).toBe('CS301');
     });
 
     it('creates a local session with generated OTP and expiration time', async () => {

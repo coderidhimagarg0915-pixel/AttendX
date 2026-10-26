@@ -20,12 +20,10 @@ import {
   Play, 
   Square, 
   Search,
-  Filter,
   RefreshCw,
   QrCode,
   Download,
   Plus,
-  ArrowUpRight,
   ShieldCheck
 } from 'lucide-react';
 
@@ -92,13 +90,15 @@ export const TeacherDashboard: React.FC = () => {
   const handleSessionCreated = (newSession: AttendanceSessionData) => {
     setActiveSession(newSession);
     // Reset roster for new session
-    const resetRoster: StudentAttendee[] = INITIAL_ROSTER.map((s, idx) => ({
-      ...s,
-      status: idx === 0 ? 'present' : 'absent',
-      timestamp: idx === 0 ? 'Just now' : '-',
-      method: idx === 0 ? 'Dynamic OTP' : 'Unreported',
-      overrideReason: undefined,
-    }));
+    const resetRoster: StudentAttendee[] = INITIAL_ROSTER.map((s, idx) => {
+      const { overrideReason: _, ...rest } = s;
+      return {
+        ...rest,
+        status: idx === 0 ? 'present' : 'absent',
+        timestamp: idx === 0 ? 'Just now' : '-',
+        method: idx === 0 ? 'Dynamic OTP' : 'Unreported',
+      };
+    });
     setRoster(resetRoster);
   };
 

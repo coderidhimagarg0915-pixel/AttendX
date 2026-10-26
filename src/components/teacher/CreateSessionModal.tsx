@@ -28,8 +28,9 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     if (isOpen) {
       sessionService.getCourses().then((list) => {
         setCourses(list);
-        if (list.length > 0 && !selectedCourseId) {
-          setSelectedCourseId(list[0].id);
+        const first = list[0];
+        if (first && !selectedCourseId) {
+          setSelectedCourseId(first.id);
         }
       });
       setErrors({});
@@ -61,6 +62,10 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
 
     // 2. Locate course details
     const course = courses.find((c) => c.id === selectedCourseId) || courses[0];
+    if (!course) {
+      setErrors({ form: 'No valid course found' });
+      return;
+    }
 
     try {
       setIsSubmitting(true);
