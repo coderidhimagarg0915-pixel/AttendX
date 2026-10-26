@@ -1,24 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StudentCheckInSchema } from '@/lib/validation';
+import { FaceVerificationModal } from '@/components/student/FaceVerificationModal';
 import { 
-  CheckCircle2, 
   AlertCircle, 
   ShieldCheck, 
-  ArrowRight
+  Camera, 
+  ScanFace 
 } from 'lucide-react';
 
 export const StudentDashboard: React.FC = () => {
-  const [sessionCode, setSessionCode] = useState('');
+  const [searchParams] = useSearchParams();
+  const paramCode = searchParams.get('code') || '';
+  const paramSessionId = searchParams.get('sessionId') || '';
+  const paramCourse = searchParams.get('course') || 'CS301';
+
+  const [sessionCode, setSessionCode] = useState(paramCode);
   const [formError, setFormError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
   const [submissionFeedback, setSubmissionFeedback] = useState<{
     status: 'success' | 'error';
     message: string;
     course?: string;
   } | null>(null);
+
+  // Sync sessionCode if search param changes
+  useEffect(() => {
+    if (paramCode) {
+      setSessionCode(paramCode);
+      // Auto prompt face verification modal if user arrived via QR scan
+      setIsFaceModalOpen(true);
+    }
+  }, [paramCode]);
 
   const mockCourses = [
     {
@@ -67,62 +83,70 @@ export const StudentDashboard: React.FC = () => {
     },
   ];
 
-  const handleCheckInSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLaunchFaceVerification = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setFormError(null);
     setSubmissionFeedback(null);
 
     // Validate using Zod schema
-    const result = StudentCheckInSchema.safeParse({ sessionCode });
+    const result = StudentCheckInSchema.safeParse({ sessionCode: sessionCode.trim() });
     if (!result.success) {
-      setFormError(result.error.errors[0]?.message || 'Invalid session code format');
+      setFormError(result.error.errors[0]?.message || 'Please enter a valid session code format');
       return;
     }
 
-    setIsSubmitting(true);
+    setIsFaceModalOpen(true);
+  };
 
-    // Simulate safe server submission delay
-    setTimeout(() => {
-      setIsSubmitting(false);
-      if (sessionCode.toUpperCase() === 'DIST-849') {
-        setSubmissionFeedback({
-          status: 'success',
-          message: 'Check-in received! Server cryptographic signature verified your attendance for CS301.',
-          course: 'CS301: Distributed Computing Systems',
-        });
-        setSessionCode('');
-      } else {
-        setSubmissionFeedback({
-          status: 'error',
-          message: 'The session code entered is invalid or has expired. Please verify with your instructor.',
-        });
-      }
-    }, 700);
+  const handleVerificationComplete = (result: { success: boolean; message: string }) => {
+    if (result.success) {
+      setSubmissionFeedback({
+        status: 'success',
+        message: result.message,
+        course: paramCourse ? `${paramCourse}: Active Attendance Recorded` : 'Attendance Successfully Recorded',
+      });
+      setSessionCode('');
+    } else {
+      setSubmissionFeedback({
+        status: 'error',
+        message: result.message,
+      });
+    }
   };
 
   return (
     <div className="space-y-6">
       {/* Title */}
-      <div className="pb-2 border-b border-slate-200">
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Student Attendance Portal</h1>
-        <p className="text-sm text-slate-500">Track semester progress, minimum requirements, and submit live session tokens.</p>
+      <div className="pb-2 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Student Attendance Portal</h1>
+          <p className="text-sm text-slate-500">
+            Submit classroom QR tokens with biometric face verification and track course quorum.
+          </p>
+        </div>
+        <Badge variant="success" className="w-fit">
+          Biometric Anti-Proxy Enforced
+        </Badge>
       </div>
 
       {/* Check-In Terminal Section */}
-      <Card className="border-emerald-200 bg-gradient-to-b from-emerald-50/40 to-white">
+      <Card className="border-emerald-200 bg-gradient-to-b from-emerald-50/40 to-white shadow-sm">
         <div className="max-w-2xl">
           <div className="flex items-center gap-2 mb-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span className="text-xs font-semibold tracking-wider uppercase text-emerald-800">
-              Live Classroom Check-In
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-xs font-bold tracking-wider uppercase text-emerald-800">
+              Live Classroom Check-In Terminal
             </span>
           </div>
-          <CardTitle className="text-xl">Have a session code from your instructor?</CardTitle>
+
+          <CardTitle className="text-xl">
+            {paramCode ? `Scanned Code for ${paramCourse}` : 'Scan Classroom QR or Enter Code'}
+          </CardTitle>
           <CardDescription className="mt-1">
-            Enter the 6 to 8-character token displayed on the classroom projection screen to record your presence.
+            Point your device camera at the classroom projector or enter the active code to initiate face verification.
           </CardDescription>
 
-          <form onSubmit={handleCheckInSubmit} className="mt-4 space-y-3">
+          <form onSubmit={handleLaunchFaceVerification} className="mt-4 space-y-3">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
                 <input
@@ -130,7 +154,7 @@ export const StudentDashboard: React.FC = () => {
                   placeholder="e.g. DIST-849"
                   value={sessionCode}
                   onChange={(e) => {
-                    setSessionCode(e.target.value);
+                    setSessionCode(e.target.value.toUpperCase());
                     if (formError) setFormError(null);
                   }}
                   className={`w-full uppercase font-mono tracking-widest text-base px-4 py-2.5 rounded-lg border bg-white focus:outline-none focus:ring-2 transition-all ${
@@ -139,17 +163,17 @@ export const StudentDashboard: React.FC = () => {
                       : 'border-slate-300 focus:ring-emerald-500'
                   }`}
                   maxLength={12}
-                  disabled={isSubmitting}
                 />
               </div>
+
+              {/* Direct Face Verification Launch Button */}
               <Button
                 type="submit"
                 variant="primary"
-                className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500"
-                isLoading={isSubmitting}
+                className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500 gap-1.5 shadow-sm"
               >
-                <CheckCircle2 className="w-4 h-4 mr-2" />
-                Submit Verification
+                <ScanFace className="w-4 h-4" />
+                Verify Face &amp; Check In
               </Button>
             </div>
 
@@ -162,10 +186,10 @@ export const StudentDashboard: React.FC = () => {
 
             {submissionFeedback && (
               <div
-                className={`p-3 rounded-lg text-xs flex items-start gap-2.5 mt-2 ${
+                className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 mt-2 animate-in fade-in duration-200 ${
                   submissionFeedback.status === 'success'
-                    ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                    : 'bg-rose-100 text-rose-900 border border-rose-300'
+                    ? 'bg-emerald-100/80 text-emerald-950 border border-emerald-300 shadow-xs'
+                    : 'bg-rose-100 text-rose-950 border border-rose-300 shadow-xs'
                 }`}
               >
                 {submissionFeedback.status === 'success' ? (
@@ -174,102 +198,86 @@ export const StudentDashboard: React.FC = () => {
                   <AlertCircle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
                 )}
                 <div>
-                  <p className="font-semibold">{submissionFeedback.message}</p>
+                  <p className="font-bold">{submissionFeedback.message}</p>
                   {submissionFeedback.course && (
-                    <p className="mt-0.5 text-emerald-800 opacity-90">{submissionFeedback.course}</p>
+                    <p className="mt-0.5 text-emerald-800 font-medium">{submissionFeedback.course}</p>
                   )}
                 </div>
               </div>
             )}
-
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-              <span>
-                Attendance is verified against official enrollment records and IP/time fencing on the database.
-              </span>
-            </div>
           </form>
+
+          {/* Biometric Guarantee Note */}
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+            <Camera className="w-3.5 h-3.5 text-brand-600 shrink-0" />
+            <span>Biometric camera verification matches facial alignment before recording attendance.</span>
+          </div>
         </div>
       </Card>
 
-      {/* Attendance Warning if any course is < 75% */}
-      {mockCourses.some((c) => c.status === 'critical') && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-          <div className="text-sm">
-            <h4 className="font-semibold text-rose-900">Attendance Threshold Alert</h4>
-            <p className="text-rose-700 text-xs mt-0.5">
-              Your attendance in <strong>MATH240 (Applied Linear Algebra)</strong> is currently <strong>70.0%</strong>, which is below the mandatory university threshold of <strong>75%</strong>. Attend the next 3 consecutive sessions to restore eligibility.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Courses List */}
+      {/* Course Enrollment & Attendance Trackers */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold text-slate-900">Enrolled Courses &amp; Quorum Status</h2>
-          <span className="text-xs text-slate-500 font-medium">Semester 5 • Fall 2026</span>
+          <h2 className="text-base font-bold text-slate-900">Enrolled Course Attendance Quorum</h2>
+          <span className="text-xs text-slate-500">Minimum threshold: 75% requirement</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {mockCourses.map((course) => {
-            const isDefaulter = course.percentage < course.required;
-            return (
-              <Card key={course.id} className="relative overflow-hidden">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                        {course.code}
-                      </span>
-                      {isDefaulter ? (
-                        <Badge variant="danger">Below 75% Requirement</Badge>
-                      ) : (
-                        <Badge variant="success">Eligible</Badge>
-                      )}
-                    </div>
-                    <h3 className="text-base font-semibold text-slate-900 mt-2">
-                      {course.name}
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">{course.faculty}</p>
-                  </div>
-
-                  <div className="text-right">
-                    <span
-                      className={`text-2xl font-extrabold ${
-                        isDefaulter ? 'text-rose-600' : 'text-slate-900'
-                      }`}
-                    >
-                      {course.percentage}%
-                    </span>
-                    <span className="block text-[11px] text-slate-400">
-                      {course.attended}/{course.totalClasses} classes
-                    </span>
+          {mockCourses.map((c) => (
+            <Card key={c.id} className="p-4 space-y-3">
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-xs font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded">
+                    {c.code}
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900 mt-1">{c.name}</h3>
+                  <p className="text-xs text-slate-500">{c.faculty}</p>
+                </div>
+                <div className="text-right">
+                  <span className={`text-lg font-black ${
+                    c.status === 'critical' ? 'text-rose-600' : 'text-emerald-600'
+                  }`}>
+                    {c.percentage}%
+                  </span>
+                  <div className="mt-1">
+                    {c.status === 'critical' ? (
+                      <Badge variant="danger" className="text-[10px]">At-Risk (&lt;75%)</Badge>
+                    ) : (
+                      <Badge variant="success" className="text-[10px]">Good Standing</Badge>
+                    )}
                   </div>
                 </div>
+              </div>
 
-                {/* Progress bar */}
-                <div className="w-full bg-slate-100 rounded-full h-2 mt-4 overflow-hidden">
+              {/* Attendance Progress bar */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-slate-500">
+                  <span>Classes Attended: {c.attended} / {c.totalClasses}</span>
+                  <span>Target: 75%</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                   <div
                     className={`h-2 rounded-full transition-all ${
-                      isDefaulter ? 'bg-rose-500' : 'bg-emerald-500'
+                      c.status === 'critical' ? 'bg-rose-500' : 'bg-emerald-500'
                     }`}
-                    style={{ width: `${course.percentage}%` }}
-                  ></div>
+                    style={{ width: `${Math.min(100, c.percentage)}%` }}
+                  />
                 </div>
-
-                <div className="flex items-center justify-between text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100">
-                  <span>Minimum Required: {course.required}%</span>
-                  <button className="text-emerald-700 hover:text-emerald-800 font-medium inline-flex items-center gap-1">
-                    Full Log <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-              </Card>
-            );
-          })}
+              </div>
+            </Card>
+          ))}
         </div>
       </div>
+
+      {/* Face Verification Modal */}
+      <FaceVerificationModal
+        isOpen={isFaceModalOpen}
+        onClose={() => setIsFaceModalOpen(false)}
+        sessionId={paramSessionId}
+        sessionCode={sessionCode}
+        courseCode={paramCourse}
+        onVerificationComplete={handleVerificationComplete}
+      />
     </div>
   );
 };
