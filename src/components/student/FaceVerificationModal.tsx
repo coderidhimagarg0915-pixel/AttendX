@@ -17,6 +17,7 @@ interface FaceVerificationModalProps {
   sessionId: string;
   sessionCode: string;
   courseCode: string;
+  qrTimestamp?: number | undefined;
   onVerificationComplete: (result: { success: boolean; message: string }) => void;
 }
 
@@ -26,6 +27,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   sessionId,
   sessionCode,
   courseCode,
+  qrTimestamp,
   onVerificationComplete,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -140,6 +142,20 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   const handleFinalSubmit = async () => {
     setIsSubmitting(true);
 
+    // Anti-Proxy Check: Prevent holding modal open indefinitely after QR rotated
+    if (qrTimestamp) {
+      const totalElapsedMs = Date.now() - qrTimestamp;
+      if (totalElapsedMs > 45000) {
+        setIsSubmitting(false);
+        onVerificationComplete({
+          success: false,
+          message: `Anti-Proxy Violation: Token window expired (${Math.round(totalElapsedMs / 1000)}s elapsed since QR generation). Please re-scan the live QR code.`,
+        });
+        onClose();
+        return;
+      }
+    }
+
     try {
       if (isSupabaseConfigured && sessionId) {
         // Attempt Real Supabase PostgreSQL RPC Call
@@ -192,10 +208,18 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
             <span className="text-slate-400 mx-1.5">•</span>
             <span className="font-mono text-brand-700 font-bold">{sessionCode}</span>
           </div>
-          <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 text-[11px]">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            Zero-Proxy Secure
-          </span>
+          <div className="flex items-center gap-1.5">
+            {qrTimestamp && (
+              <span className="inline-flex items-center gap-1 text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 text-[11px]">
+                <Sparkles className="w-3 h-3 text-indigo-500" />
+                Live QR
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 text-[11px]">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Zero-Proxy
+            </span>
+          </div>
         </div>
 
         {/* Camera Feed / Biometric HUD Viewport */}

@@ -11,6 +11,7 @@ interface SessionQrModalProps {
   onClose: () => void;
   session: AttendanceSessionData | null;
   timeLeftFormatted: string;
+  onCodeRotated?: (newCode: string, timestamp: number) => void;
 }
 
 const ROTATION_INTERVAL_SECONDS = 15;
@@ -21,9 +22,11 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   onClose,
   session,
   timeLeftFormatted,
+  onCodeRotated,
 }) => {
   const [copied, setCopied] = useState(false);
   const [currentOtp, setCurrentOtp] = useState<string>('');
+  const [currentOtpTimestamp, setCurrentOtpTimestamp] = useState<number>(Date.now());
   const [secondsUntilRotation, setSecondsUntilRotation] = useState(ROTATION_INTERVAL_SECONDS);
 
   // If accessed via localhost, default to laptop's Wi-Fi LAN IP so phones can connect
@@ -41,6 +44,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   useEffect(() => {
     if (session && isOpen) {
       setCurrentOtp(session.code);
+      setCurrentOtpTimestamp(Date.now());
       setSecondsUntilRotation(ROTATION_INTERVAL_SECONDS);
       // Ensure mobileHost is using the LAN IP if currently on localhost
       if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -56,9 +60,12 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
     const interval = setInterval(() => {
       setSecondsUntilRotation((prev) => {
         if (prev <= 1) {
-          // Generate new dynamic token
+          // Generate new dynamic token with fresh timestamp
           const freshCode = generateSessionCode(session.courseCode);
+          const freshTs = Date.now();
           setCurrentOtp(freshCode);
+          setCurrentOtpTimestamp(freshTs);
+          onCodeRotated?.(freshCode, freshTs);
           return ROTATION_INTERVAL_SECONDS;
         }
         return prev - 1;
@@ -66,12 +73,12 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isOpen, session]);
+  }, [isOpen, session, onCodeRotated]);
 
   if (!session) return null;
 
-  // Real mobile check-in URL encoded in the QR code (using Wi-Fi LAN host)
-  const checkinUrl = `${mobileHost}/student?sessionId=${session.id}&code=${currentOtp}&course=${encodeURIComponent(session.courseCode)}`;
+  // Real mobile check-in URL encoded in the QR code (with 15s cryptographic timestamp)
+  const checkinUrl = `${mobileHost}/student?sessionId=${session.id}&code=${currentOtp}&ts=${currentOtpTimestamp}&course=${encodeURIComponent(session.courseCode)}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(currentOtp);
@@ -81,8 +88,11 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
 
   const handleManualRotate = () => {
     const freshCode = generateSessionCode(session.courseCode);
+    const freshTs = Date.now();
     setCurrentOtp(freshCode);
+    setCurrentOtpTimestamp(freshTs);
     setSecondsUntilRotation(ROTATION_INTERVAL_SECONDS);
+    onCodeRotated?.(freshCode, freshTs);
   };
 
   const progressPercent = ((ROTATION_INTERVAL_SECONDS - secondsUntilRotation) / ROTATION_INTERVAL_SECONDS) * 100;

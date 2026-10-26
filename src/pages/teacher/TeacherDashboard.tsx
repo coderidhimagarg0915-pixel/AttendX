@@ -611,6 +611,9 @@ export const TeacherDashboard: React.FC = () => {
         onClose={() => setIsQrModalOpen(false)}
         session={activeSession}
         timeLeftFormatted={timeLeftFormatted}
+        onCodeRotated={(newCode) => {
+          setActiveSession((prev) => (prev ? { ...prev, code: newCode } : null));
+        }}
       />
     </div>
   );
