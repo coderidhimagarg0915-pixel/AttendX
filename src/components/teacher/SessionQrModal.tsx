@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles } from 'lucide-react';
+import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles, Wifi } from 'lucide-react';
 import type { AttendanceSessionData } from '@/services/sessionService';
 import { generateSessionCode } from '@/services/sessionService';
 
@@ -14,6 +14,7 @@ interface SessionQrModalProps {
 }
 
 const ROTATION_INTERVAL_SECONDS = 15;
+const DEFAULT_LAN_IP = '192.168.1.3';
 
 export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   isOpen,
@@ -25,11 +26,26 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   const [currentOtp, setCurrentOtp] = useState<string>('');
   const [secondsUntilRotation, setSecondsUntilRotation] = useState(ROTATION_INTERVAL_SECONDS);
 
+  // If accessed via localhost, default to laptop's Wi-Fi LAN IP so phones can connect
+  const defaultNetworkHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? `http://${DEFAULT_LAN_IP}:5173`
+      : typeof window !== 'undefined'
+      ? window.location.origin
+      : `http://${DEFAULT_LAN_IP}:5173`;
+
+  const [mobileHost, setMobileHost] = useState(defaultNetworkHost);
+
   // Initialize or update OTP when session loads or modal opens
   useEffect(() => {
     if (session && isOpen) {
       setCurrentOtp(session.code);
       setSecondsUntilRotation(ROTATION_INTERVAL_SECONDS);
+      // Ensure mobileHost is using the LAN IP if currently on localhost
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        setMobileHost(`http://${DEFAULT_LAN_IP}:5173`);
+      }
     }
   }, [session, isOpen]);
 
@@ -54,8 +70,8 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
 
   if (!session) return null;
 
-  // Real mobile check-in URL encoded in the QR code
-  const checkinUrl = `${window.location.origin}/student?sessionId=${session.id}&code=${currentOtp}&course=${encodeURIComponent(session.courseCode)}`;
+  // Real mobile check-in URL encoded in the QR code (using Wi-Fi LAN host)
+  const checkinUrl = `${mobileHost}/student?sessionId=${session.id}&code=${currentOtp}&course=${encodeURIComponent(session.courseCode)}`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(currentOtp);
@@ -79,7 +95,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
       description="Students scan this live QR with their mobile camera to launch face verification check-in."
       maxWidth="xl"
     >
-      <div className="flex flex-col items-center text-center space-y-6 py-2">
+      <div className="flex flex-col items-center text-center space-y-5 py-2">
         {/* Course & Session Info */}
         <div>
           <div className="inline-flex items-center gap-2 text-xs font-bold tracking-widest text-brand-700 uppercase bg-brand-50 px-3.5 py-1 rounded-full border border-brand-200">
@@ -90,6 +106,36 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-2">
             {session.title}
           </h2>
+        </div>
+
+        {/* Network Target Host Selector (for phones on Wi-Fi vs local) */}
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs bg-slate-50 p-2 rounded-xl border border-slate-200 w-full max-w-lg">
+          <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1">
+            <Wifi className="w-3.5 h-3.5 text-brand-600" />
+            Phone Target:
+          </span>
+          <button
+            type="button"
+            onClick={() => setMobileHost(`http://${DEFAULT_LAN_IP}:5173`)}
+            className={`px-3 py-1 rounded-lg font-mono text-xs font-semibold transition-all ${
+              mobileHost.includes(DEFAULT_LAN_IP)
+                ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-700'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            📶 Wi-Fi LAN ({DEFAULT_LAN_IP}:5173)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileHost(window.location.origin)}
+            className={`px-3 py-1 rounded-lg font-mono text-xs font-semibold transition-all ${
+              !mobileHost.includes(DEFAULT_LAN_IP)
+                ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-700'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            💻 Localhost
+          </button>
         </div>
 
         {/* Live Rotating QR Code Showcase */}
@@ -157,7 +203,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
               Force Rotate QR
             </button>
 
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-semibold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
               ⏳ Session Closes: {timeLeftFormatted}
             </span>
           </div>
@@ -171,7 +217,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
               <span>Step 1: Scan Live QR</span>
             </div>
             <p className="text-slate-500 leading-relaxed text-[11px]">
-              Open phone camera or scanner to read this rotating QR code. The token expires every 15 seconds to prevent sharing.
+              Scan with your phone camera. Both devices must be on the same Wi-Fi network.
             </p>
           </div>
 
@@ -181,7 +227,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
               <span>Step 2: Instant Face Match</span>
             </div>
             <p className="text-slate-500 leading-relaxed text-[11px]">
-              The student's camera activates for biometric face alignment before marking verified attendance in PostgreSQL.
+              Your phone camera will open to verify your face and mark your verified attendance.
             </p>
           </div>
         </div>
@@ -194,7 +240,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
             rel="noreferrer"
             className="text-xs font-semibold text-brand-600 hover:text-brand-800 inline-flex items-center gap-1"
           >
-            Launch student camera test window <ExternalLink className="w-3.5 h-3.5" />
+            Launch student check-in link ({mobileHost}) <ExternalLink className="w-3.5 h-3.5" />
           </a>
 
           <Button variant="secondary" size="sm" onClick={onClose}>
