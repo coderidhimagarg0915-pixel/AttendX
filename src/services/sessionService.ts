@@ -38,42 +38,6 @@ export interface StudentAttendee {
   overrideReason?: string | undefined;
 }
 
-// Fallback Mock Courses
-const DEFAULT_COURSES: Course[] = [
-  {
-    id: 'c1111111-1111-1111-1111-111111111111',
-    code: 'CS301',
-    name: 'Distributed Computing Systems',
-    semester: 'Fall',
-    academicYear: '2026-2027',
-    enrolledCount: 48,
-  },
-  {
-    id: 'c2222222-2222-2222-2222-222222222222',
-    code: 'CS402',
-    name: 'Advanced Database Architectures',
-    semester: 'Fall',
-    academicYear: '2026-2027',
-    enrolledCount: 42,
-  },
-  {
-    id: 'c3333333-3333-3333-3333-333333333333',
-    code: 'SE205',
-    name: 'Agile Software Engineering',
-    semester: 'Fall',
-    academicYear: '2026-2027',
-    enrolledCount: 55,
-  },
-  {
-    id: 'c4444444-4444-4444-4444-444444444444',
-    code: 'CS101',
-    name: 'Computer Systems & Architecture',
-    semester: 'Fall',
-    academicYear: '2026-2027',
-    enrolledCount: 60,
-  },
-];
-
 // Helper to generate a dynamic readable OTP code (e.g. DIST-849 or CS-942)
 export function generateSessionCode(prefix = 'ATT'): string {
   const cleanPrefix = prefix.replace(/[^A-Z]/gi, '').toUpperCase().slice(0, 4) || 'ATT';
@@ -87,7 +51,7 @@ export const sessionService = {
    */
   async getCourses(): Promise<Course[]> {
     if (!isSupabaseConfigured) {
-      return DEFAULT_COURSES;
+      return [];
     }
 
     try {
@@ -96,7 +60,7 @@ export const sessionService = {
         .select('*');
 
       if (error || !data || data.length === 0) {
-        return DEFAULT_COURSES;
+        return [];
       }
 
       return (data as any[]).map((c) => ({
@@ -105,10 +69,10 @@ export const sessionService = {
         name: c.name,
         semester: c.semester,
         academicYear: c.academic_year,
-        enrolledCount: 45, // default estimated cohort
+        enrolledCount: 0,
       }));
     } catch {
-      return DEFAULT_COURSES;
+      return [];
     }
   },
 

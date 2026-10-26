@@ -5,83 +5,52 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { StudentCheckInSchema } from '@/lib/validation';
 import { FaceVerificationModal } from '@/components/student/FaceVerificationModal';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { 
   AlertCircle, 
   ShieldCheck, 
   Camera, 
-  ScanFace 
+  ScanFace,
+  BookOpen
 } from 'lucide-react';
 
 export const StudentDashboard: React.FC = () => {
   const [searchParams] = useSearchParams();
   const paramCode = searchParams.get('code') || '';
   const paramSessionId = searchParams.get('sessionId') || '';
-  const paramCourse = searchParams.get('course') || 'CS301';
+  const paramCourse = searchParams.get('course') || '';
 
   const [sessionCode, setSessionCode] = useState(paramCode);
   const [formError, setFormError] = useState<string | null>(null);
   const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
+  const [courses, setCourses] = useState<any[]>([]);
   const [submissionFeedback, setSubmissionFeedback] = useState<{
     status: 'success' | 'error';
     message: string;
     course?: string;
   } | null>(null);
 
-  // Sync sessionCode if search param changes
+  // Sync sessionCode if search param changes and auto-prompt face scanner
   useEffect(() => {
     if (paramCode) {
       setSessionCode(paramCode);
-      // Auto prompt face verification modal if user arrived via QR scan
       setIsFaceModalOpen(true);
     }
   }, [paramCode]);
 
-  const mockCourses = [
-    {
-      id: 'c1',
-      code: 'CS301',
-      name: 'Distributed Computing Systems',
-      faculty: 'Dr. Sarah Jenkins',
-      totalClasses: 32,
-      attended: 29,
-      percentage: 90.6,
-      required: 75,
-      status: 'safe',
-    },
-    {
-      id: 'c2',
-      code: 'CS304',
-      name: 'Database Architecture & Internals',
-      faculty: 'Prof. Marcus Vance',
-      totalClasses: 28,
-      attended: 25,
-      percentage: 89.2,
-      required: 75,
-      status: 'safe',
-    },
-    {
-      id: 'c3',
-      code: 'MATH240',
-      name: 'Applied Linear Algebra & Statistics',
-      faculty: 'Dr. Elena Rostova',
-      totalClasses: 30,
-      attended: 21,
-      percentage: 70.0,
-      required: 75,
-      status: 'critical', // < 75%
-    },
-    {
-      id: 'c4',
-      code: 'CS310',
-      name: 'Computer Networks & Protocols',
-      faculty: 'Dr. Alan Morales',
-      totalClasses: 26,
-      attended: 22,
-      percentage: 84.6,
-      required: 75,
-      status: 'safe',
-    },
-  ];
+  // Load real courses from Supabase
+  useEffect(() => {
+    if (isSupabaseConfigured) {
+      (supabase as any)
+        .from('courses')
+        .select('*')
+        .then(({ data }: any) => {
+          if (data && data.length > 0) {
+            setCourses(data);
+          }
+        });
+    }
+  }, []);
 
   const handleLaunchFaceVerification = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -140,7 +109,7 @@ export const StudentDashboard: React.FC = () => {
           </div>
 
           <CardTitle className="text-xl">
-            {paramCode ? `Scanned Code for ${paramCourse}` : 'Scan Classroom QR or Enter Code'}
+            {paramCode ? `Scanned Code for ${paramCourse || 'Classroom Session'}` : 'Scan Classroom QR or Enter Code'}
           </CardTitle>
           <CardDescription className="mt-1">
             Point your device camera at the classroom projector or enter the active code to initiate face verification.
@@ -215,58 +184,39 @@ export const StudentDashboard: React.FC = () => {
         </div>
       </Card>
 
-      {/* Course Enrollment & Attendance Trackers */}
+      {/* Real Course Attendance Quorum */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-base font-bold text-slate-900">Enrolled Course Attendance Quorum</h2>
           <span className="text-xs text-slate-500">Minimum threshold: 75% requirement</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {mockCourses.map((c) => (
-            <Card key={c.id} className="p-4 space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-xs font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded">
-                    {c.code}
-                  </span>
-                  <h3 className="text-sm font-bold text-slate-900 mt-1">{c.name}</h3>
-                  <p className="text-xs text-slate-500">{c.faculty}</p>
-                </div>
-                <div className="text-right">
-                  <span className={`text-lg font-black ${
-                    c.status === 'critical' ? 'text-rose-600' : 'text-emerald-600'
-                  }`}>
-                    {c.percentage}%
-                  </span>
-                  <div className="mt-1">
-                    {c.status === 'critical' ? (
-                      <Badge variant="danger" className="text-[10px]">At-Risk (&lt;75%)</Badge>
-                    ) : (
-                      <Badge variant="success" className="text-[10px]">Good Standing</Badge>
-                    )}
+        {courses.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {courses.map((c) => (
+              <Card key={c.id} className="p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-xs font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded">
+                      {c.code}
+                    </span>
+                    <h3 className="text-sm font-bold text-slate-900 mt-1">{c.name}</h3>
+                    <p className="text-xs text-slate-500">{c.semester} • {c.academic_year}</p>
                   </div>
+                  <Badge variant="success">Enrolled</Badge>
                 </div>
-              </div>
-
-              {/* Attendance Progress bar */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs text-slate-500">
-                  <span>Classes Attended: {c.attended} / {c.totalClasses}</span>
-                  <span>Target: 75%</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                  <div
-                    className={`h-2 rounded-full transition-all ${
-                      c.status === 'critical' ? 'bg-rose-500' : 'bg-emerald-500'
-                    }`}
-                    style={{ width: `${Math.min(100, c.percentage)}%` }}
-                  />
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+            <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="text-sm font-semibold text-slate-700">No Registered Courses in Database</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              Once faculty creates course cohorts in Supabase, your course quorum cards will be displayed here.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Face Verification Modal */}

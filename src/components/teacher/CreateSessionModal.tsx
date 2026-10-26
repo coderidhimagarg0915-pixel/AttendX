@@ -18,6 +18,8 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
 }) => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [customCourseCode, setCustomCourseCode] = useState('CS301');
+  const [customCourseName, setCustomCourseName] = useState('Distributed Computing Systems');
   const [title, setTitle] = useState('');
   const [room, setRoom] = useState('Hall B-204');
   const [expirationMinutes, setExpirationMinutes] = useState<number>(15);
@@ -41,9 +43,11 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     e.preventDefault();
     setErrors({});
 
+    const effectiveCourseId = selectedCourseId || '123e4567-e89b-12d3-a456-426614174000';
+
     // 1. Zod Validation
     const validationResult = CreateSessionSchema.safeParse({
-      courseId: selectedCourseId,
+      courseId: effectiveCourseId,
       title,
       expirationMinutes,
       requirePasscode: true,
@@ -60,19 +64,18 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       return;
     }
 
-    // 2. Locate course details
-    const course = courses.find((c) => c.id === selectedCourseId) || courses[0];
-    if (!course) {
-      setErrors({ form: 'No valid course found' });
-      return;
-    }
+    // 2. Determine Course details
+    const existingCourse = courses.find((c) => c.id === selectedCourseId);
+    const courseCode = existingCourse?.code || customCourseCode.trim() || 'CS301';
+    const courseName = existingCourse?.name || customCourseName.trim() || 'Classroom Lecture';
+    const courseId = existingCourse?.id || effectiveCourseId;
 
     try {
       setIsSubmitting(true);
       const newSession = await sessionService.createSession({
-        courseId: course.id,
-        courseCode: course.code,
-        courseName: course.name,
+        courseId,
+        courseCode,
+        courseName,
         title: title.trim(),
         room: room.trim() || 'Hall B-204',
         expirationMinutes,
@@ -88,6 +91,7 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   };
 
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
+  const activeCourseCode = selectedCourse?.code || customCourseCode;
 
   return (
     <Modal
@@ -105,29 +109,55 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
           </div>
         )}
 
-        {/* Course Selection */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-            Select Course & Cohort
-          </label>
-          <div className="relative">
-            <BookOpen className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-            <select
-              value={selectedCourseId}
-              onChange={(e) => setSelectedCourseId(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-800"
-            >
-              {courses.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} — {c.name} ({c.enrolledCount} enrolled)
-                </option>
-              ))}
-            </select>
+        {/* Course Selection or Entry */}
+        {courses.length > 0 ? (
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              Select Course & Cohort
+            </label>
+            <div className="relative">
+              <BookOpen className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              <select
+                value={selectedCourseId}
+                onChange={(e) => setSelectedCourseId(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium text-slate-800"
+              >
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} — {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          {errors.courseId && (
-            <p className="text-xs text-rose-600 mt-1">{errors.courseId}</p>
-          )}
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                Course Code
+              </label>
+              <input
+                type="text"
+                value={customCourseCode}
+                onChange={(e) => setCustomCourseCode(e.target.value.toUpperCase())}
+                placeholder="e.g. CS301"
+                className="w-full px-3 py-2 text-sm font-mono font-bold uppercase border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                Course Title
+              </label>
+              <input
+                type="text"
+                value={customCourseName}
+                onChange={(e) => setCustomCourseName(e.target.value)}
+                placeholder="e.g. Distributed Computing"
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Session Topic / Title */}
         <div>
@@ -198,8 +228,8 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
           </div>
           <p className="text-[11px] text-slate-500 leading-relaxed">
             Generates a high-entropy check-in code prefixed by{' '}
-            <span className="font-mono font-bold text-brand-700">{selectedCourse?.code || 'ATT'}</span>. 
-            Students must be enrolled in the course and within the active window to record attendance.
+            <span className="font-mono font-bold text-brand-700">{activeCourseCode || 'ATT'}</span>. 
+            Students must scan the rotating QR code and complete biometric face verification within the window.
           </p>
         </div>
 
