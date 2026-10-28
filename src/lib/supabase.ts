@@ -12,6 +12,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+export const isSupabaseConfigured = Boolean(
+  supabaseUrl && 
+  supabaseAnonKey && 
+  !supabaseUrl.includes('placeholder')
+);
+
 // Ensure ONLY public anon key is used in frontend code
 export const supabase = createClient<Database>(
   supabaseUrl || 'https://placeholder.supabase.co',
@@ -24,3 +30,4 @@ export const supabase = createClient<Database>(
     },
   }
 );
+
