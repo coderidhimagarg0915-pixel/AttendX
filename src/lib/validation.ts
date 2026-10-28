@@ -38,3 +38,15 @@ export const ManualAttendanceOverrideSchema = z.object({
 });
 
 export type ManualAttendanceOverrideInput = z.infer<typeof ManualAttendanceOverrideSchema>;
+
+export const MNIT_EMAIL_DOMAIN = '@mnit.ac.in';
+
+export const MnitEmailSchema = z
+  .string()
+  .trim()
+  .email('Please enter a valid email address')
+  .refine(
+    (email) => email.toLowerCase().endsWith(MNIT_EMAIL_DOMAIN),
+    'Access restricted: You must use an official @mnit.ac.in email ID'
+  );
+

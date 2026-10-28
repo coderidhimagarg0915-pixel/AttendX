@@ -38,3 +38,4 @@ supabase/.branch
 # Vitest Coverage
 coverage
 supabase/migrations copy/
+*.tsbuildinfo

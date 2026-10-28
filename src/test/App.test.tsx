@@ -3,9 +3,10 @@ import { render, screen } from '@testing-library/react';
 import App from '../App';
 
 describe('AttendX App Routing & Landing', () => {
-  it('renders landing page with portal options', () => {
+  it('renders landing page with portal options and login link', () => {
     render(<App />);
-    expect(screen.getAllByText(/AttendX/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/AttendX/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Sign In \/ Register/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Faculty Portal/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Student Portal/i })).toBeInTheDocument();
   });

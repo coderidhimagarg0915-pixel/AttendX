@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { StudentCheckInSchema, CreateSessionSchema } from '../lib/validation';
+import { StudentCheckInSchema, CreateSessionSchema, MnitEmailSchema } from '../lib/validation';
 
 describe('Validation Schemas (Zod)', () => {
   describe('StudentCheckInSchema', () => {
@@ -45,6 +45,36 @@ describe('Validation Schemas (Zod)', () => {
         expirationMinutes: 240,
         requirePasscode: true,
       });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('MnitEmailSchema (@mnit.ac.in restriction)', () => {
+    it('accepts valid MNIT student email', () => {
+      const result = MnitEmailSchema.safeParse('2024ucp1234@mnit.ac.in');
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts valid MNIT faculty email', () => {
+      const result = MnitEmailSchema.safeParse('faculty.cse@mnit.ac.in');
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects public domain emails like gmail.com', () => {
+      const result = MnitEmailSchema.safeParse('alex@gmail.com');
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.errors[0]?.message).toContain('@mnit.ac.in');
+      }
+    });
+
+    it('rejects other university domain emails', () => {
+      const result = MnitEmailSchema.safeParse('student@iitd.ac.in');
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects invalid email formats', () => {
+      const result = MnitEmailSchema.safeParse('not-an-email');
       expect(result.success).toBe(false);
     });
   });
