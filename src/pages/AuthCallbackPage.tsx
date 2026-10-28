@@ -54,27 +54,31 @@ export const AuthCallbackPage: React.FC = () => {
         try {
           const { data: profile, error } = await supabase
             .from('profiles')
-            .select('role, institution_id')
+            .select('role, institution_id, face_embedding')
             .eq('id', user.id)
             .maybeSingle();
 
           // A user is NOT registered if:
           // 1. No profile exists in public.profiles, OR
-          // 2. The user has no assigned role in their user_metadata AND no institution_id/role setup completed
+          // 2. The user has no assigned role in their user_metadata AND no institution_id/face_embedding completed
           // (which happens when Supabase trigger auto-inserts a default 'student' profile on Google OAuth login)
           const isGoogleUser = user.app_metadata?.provider === 'google' || 
                                user.identities?.some(id => id.provider === 'google');
           const hasExplicitRole = !!user.user_metadata?.role;
-          const isRegistered = profile && (!isGoogleUser || hasExplicitRole || !!profile.institution_id);
+          const isRegistered = profile && (!isGoogleUser || hasExplicitRole || !!profile.institution_id || !!profile.face_embedding);
 
           if (error || !isRegistered) {
-            // Unregistered user! Sign out immediately and bounce to login with error
-            // Also clean up any auto-created stub profile
+            // Unregistered user! Purge the temporary record completely so no data is stored
             try {
-              await supabase.from('profiles').delete().eq('id', user.id);
+              await supabase.rpc('delete_current_unregistered_user');
             } catch {
-              // Ignore if RLS restricts delete
+              try {
+                await supabase.from('profiles').delete().eq('id', user.id);
+              } catch {
+                // Ignore if fallback delete fails
+              }
             }
+
             await supabase.auth.signOut();
             setStatus('error');
             setMessage('No registered account found for this Google email. Please register first.');
