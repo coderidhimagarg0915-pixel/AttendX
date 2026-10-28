@@ -5,11 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { 
   GraduationCap, 
   BookOpen, 
-  ShieldCheck, 
-  Users, 
   Sparkles, 
   ArrowRight,
-  Database,
   CheckCircle2,
   Lock
 } from 'lucide-react';
@@ -33,8 +30,13 @@ export const LandingPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link to="/login">
+              <Button variant="outline" size="sm" className="font-semibold text-brand-700 border-brand-300 hover:bg-brand-50">
+                Sign In / Register
+              </Button>
+            </Link>
             <Link to="/teacher">
-              <Button variant="outline" size="sm">
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
                 Faculty Portal
               </Button>
             </Link>
@@ -52,7 +54,7 @@ export const LandingPage: React.FC = () => {
         <div className="text-center max-w-3xl mx-auto space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200">
             <Sparkles className="w-3.5 h-3.5" />
-            Milestone 1 — Frontend Foundation &amp; Architecture
+            Milestone 2 — Centralized Supabase Auth &amp; Google Classroom-Style Enrollment
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
             High-integrity classroom attendance for modern higher education.
