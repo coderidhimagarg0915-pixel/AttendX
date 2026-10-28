@@ -15,7 +15,10 @@ import {
   ArrowRight,
   ShieldCheck,
   IdCard,
+  Camera,
+  Check,
 } from 'lucide-react';
+import { FaceScannerModal } from '@/components/auth/FaceScannerModal';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -35,6 +38,12 @@ export const LoginPage: React.FC = () => {
   const [rollNumber, setRollNumber] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isTeacherSignup, setIsTeacherSignup] = useState(false);
+
+  // Biometric Face Capture States
+  const [isFaceModalOpen, setIsFaceModalOpen] = useState(false);
+  const [faceDescriptor, setFaceDescriptor] = useState<number[] | null>(null);
+  const [faceImageBlob, setFaceImageBlob] = useState<Blob | null>(null);
+  const [facePreviewUrl, setFacePreviewUrl] = useState<string | null>(null);
 
   // States
   const [isLoading, setIsLoading] = useState(false);
@@ -154,6 +163,12 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
+    // Require face scan for students (optional for faculty)
+    if (!isTeacherSignup && !faceDescriptor) {
+      setErrorMessage('Biometric Face Registration is required for students. Please click "Scan Face" below.');
+      return;
+    }
+
     setIsLoading(true);
     const assignedRole = isTeacherSignup ? 'faculty' : 'student';
 
@@ -163,6 +178,8 @@ export const LoginPage: React.FC = () => {
       fullName,
       institutionId: rollNumber ? rollNumber : undefined,
       role: assignedRole,
+      faceEmbedding: faceDescriptor || undefined,
+      faceImageBlob: faceImageBlob || undefined,
     });
 
     setIsLoading(false);
@@ -443,11 +460,68 @@ export const LoginPage: React.FC = () => {
                   <span className="text-slate-700 font-medium">Are you a faculty member?</span>
                   <button
                     type="button"
-                    onClick={() => setIsTeacherSignup(!isTeacherSignup)}
+                    onClick={() => {
+                      setIsTeacherSignup(!isTeacherSignup);
+                      setErrorMessage(null);
+                    }}
                     className="text-brand-600 font-semibold hover:underline"
                   >
                     {isTeacherSignup ? 'Register as Student' : 'Register as Faculty'}
                   </button>
+                </div>
+              </div>
+
+              {/* Biometric Face Registration Section */}
+              <div className="p-3.5 rounded-xl border border-dashed border-slate-300 bg-slate-50/70">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-brand-600" />
+                      <span className="text-xs font-bold text-slate-800">
+                        Face Biometric Scan {!isTeacherSignup && <span className="text-rose-500">*</span>}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {isTeacherSignup
+                        ? 'Optional for faculty members'
+                        : 'Required to verify presence during classroom attendance sessions'}
+                    </p>
+                  </div>
+
+                  {facePreviewUrl ? (
+                    <div className="relative group shrink-0">
+                      <img
+                        src={facePreviewUrl}
+                        alt="Enrolled Face"
+                        className="w-11 h-11 rounded-lg object-cover border-2 border-emerald-500 shadow-sm"
+                      />
+                      <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-0.5">
+                        <Check className="w-3 h-3" />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsFaceModalOpen(true)}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all shadow-sm ${
+                      faceDescriptor
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
+                        : 'bg-brand-600 hover:bg-brand-700 text-white'
+                    }`}
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>{faceDescriptor ? 'Re-scan Face' : 'Open Camera & Scan Face'}</span>
+                  </button>
+
+                  {faceDescriptor && (
+                    <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1 bg-emerald-100/60 px-2.5 py-1.5 rounded-lg border border-emerald-200">
+                      <Check className="w-3 h-3" />
+                      Enrolled
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -473,6 +547,18 @@ export const LoginPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Live Biometric Face Scanner Modal */}
+      <FaceScannerModal
+        isOpen={isFaceModalOpen}
+        onClose={() => setIsFaceModalOpen(false)}
+        onFaceCaptured={(data) => {
+          setFaceDescriptor(data.descriptor);
+          setFaceImageBlob(data.imageBlob);
+          setFacePreviewUrl(data.previewUrl);
+          setErrorMessage(null);
+        }}
+      />
     </div>
   );
 };
