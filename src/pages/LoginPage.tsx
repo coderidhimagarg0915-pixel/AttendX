@@ -35,7 +35,6 @@ export const LoginPage: React.FC = () => {
   const [rollNumber, setRollNumber] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isTeacherSignup, setIsTeacherSignup] = useState(false);
-  const [facultyPasscode, setFacultyPasscode] = useState('');
 
   // States
   const [isLoading, setIsLoading] = useState(false);
@@ -142,12 +141,6 @@ export const LoginPage: React.FC = () => {
 
     if (password !== confirmPassword) {
       setErrorMessage('Passwords do not match.');
-      return;
-    }
-
-    // Faculty verification code guard
-    if (isTeacherSignup && facultyPasscode !== 'FACULTY-2026') {
-      setErrorMessage('Invalid Faculty Verification Passcode. Contact college IT administration.');
       return;
     }
 
@@ -446,24 +439,6 @@ export const LoginPage: React.FC = () => {
                     {isTeacherSignup ? 'Register as Student' : 'Register as Faculty'}
                   </button>
                 </div>
-
-                {isTeacherSignup && (
-                  <div className="mt-2.5 p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-xs">
-                    <label className="block font-semibold text-amber-900 mb-1">
-                      Faculty Passcode Required
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter verification code (FACULTY-2026)"
-                      value={facultyPasscode}
-                      onChange={(e) => setFacultyPasscode(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs rounded border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    />
-                    <span className="text-[10px] text-amber-700 block mt-1">
-                      Default demo passcode: <strong>FACULTY-2026</strong>
-                    </span>
-                  </div>
-                )}
               </div>
 
               <div className="pt-2">

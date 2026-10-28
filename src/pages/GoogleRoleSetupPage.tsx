@@ -29,7 +29,6 @@ export const GoogleRoleSetupPage: React.FC = () => {
 
   const [selectedRole, setSelectedRole] = useState<'student' | 'faculty' | null>(null);
   const [institutionId, setInstitutionId] = useState('');
-  const [facultyPasscode, setFacultyPasscode] = useState('');
   const [fullName, setFullName] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -66,11 +65,6 @@ export const GoogleRoleSetupPage: React.FC = () => {
 
     if (!fullName.trim()) {
       setErrorMessage('Please enter your full name.');
-      return;
-    }
-
-    if (selectedRole === 'faculty' && facultyPasscode !== 'FACULTY-2026') {
-      setErrorMessage('Invalid Faculty Verification Passcode. Contact college IT administration.');
       return;
     }
 
@@ -185,7 +179,7 @@ export const GoogleRoleSetupPage: React.FC = () => {
                 {/* Student */}
                 <button
                   type="button"
-                  onClick={() => { setSelectedRole('student'); setFacultyPasscode(''); }}
+                  onClick={() => setSelectedRole('student')}
                   className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
                     selectedRole === 'student'
                       ? 'border-brand-500 bg-brand-50 shadow-sm'
@@ -249,25 +243,6 @@ export const GoogleRoleSetupPage: React.FC = () => {
                 />
               </div>
             </div>
-
-            {/* Faculty Passcode */}
-            {selectedRole === 'faculty' && (
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
-                <label className="block text-xs font-semibold text-amber-900 mb-1">
-                  Faculty Verification Passcode <span className="text-rose-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter verification code"
-                  value={facultyPasscode}
-                  onChange={(e) => setFacultyPasscode(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs rounded border border-amber-300 bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
-                <span className="text-[10px] text-amber-700 block mt-1">
-                  Demo passcode: <strong>FACULTY-2026</strong>
-                </span>
-              </div>
-            )}
 
             {/* Submit */}
             <button
