@@ -9,17 +9,23 @@ interface CreateSessionModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSessionCreated: (session: any) => void;
+  courseId?: string;
+  courseCode?: string;
+  courseName?: string;
 }
 
 export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   isOpen,
   onClose,
   onSessionCreated,
+  courseId,
+  courseCode,
+  courseName,
 }) => {
   const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
-  const [customCourseCode, setCustomCourseCode] = useState('CS301');
-  const [customCourseName, setCustomCourseName] = useState('Distributed Computing Systems');
+  const [selectedCourseId, setSelectedCourseId] = useState<string>(courseId || '');
+  const [customCourseCode, setCustomCourseCode] = useState(courseCode || 'CS301');
+  const [customCourseName, setCustomCourseName] = useState(courseName || 'Distributed Computing Systems');
   const [title, setTitle] = useState('');
   const [room, setRoom] = useState('Hall B-204');
   const [expirationMinutes, setExpirationMinutes] = useState<number>(15);
@@ -28,16 +34,20 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      sessionService.getCourses().then((list) => {
-        setCourses(list);
-        const first = list[0];
-        if (first && !selectedCourseId) {
-          setSelectedCourseId(first.id);
-        }
-      });
+      if (courseId) {
+        setSelectedCourseId(courseId);
+      } else {
+        sessionService.getCourses().then((list) => {
+          setCourses(list);
+          const first = list[0];
+          if (first && !selectedCourseId) {
+            setSelectedCourseId(first.id);
+          }
+        });
+      }
       setErrors({});
     }
-  }, [isOpen]);
+  }, [isOpen, courseId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,17 +75,17 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     }
 
     // 2. Determine Course details
-    const existingCourse = courses.find((c) => c.id === selectedCourseId);
-    const courseCode = existingCourse?.code || customCourseCode.trim() || 'CS301';
-    const courseName = existingCourse?.name || customCourseName.trim() || 'Classroom Lecture';
-    const courseId = existingCourse?.id || effectiveCourseId;
+    const existingCourse = courses.find((c) => c.id === effectiveCourseId);
+    const finalCourseCode = courseCode || existingCourse?.code || customCourseCode.trim() || 'CS301';
+    const finalCourseName = courseName || existingCourse?.name || customCourseName.trim() || 'Classroom Lecture';
+    const finalCourseId = effectiveCourseId;
 
     try {
       setIsSubmitting(true);
       const newSession = await sessionService.createSession({
-        courseId,
-        courseCode,
-        courseName,
+        courseId: finalCourseId,
+        courseCode: finalCourseCode,
+        courseName: finalCourseName,
         title: title.trim(),
         room: room.trim() || 'Hall B-204',
         expirationMinutes,
@@ -91,7 +101,7 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   };
 
   const selectedCourse = courses.find((c) => c.id === selectedCourseId);
-  const activeCourseCode = selectedCourse?.code || customCourseCode;
+  const activeCourseCode = courseCode || selectedCourse?.code || customCourseCode;
 
   return (
     <Modal
@@ -110,7 +120,22 @@ export const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
         )}
 
         {/* Course Selection or Entry */}
-        {courses.length > 0 ? (
+        {courseId ? (
+          <div className="bg-brand-50/70 border border-brand-200 rounded-xl p-3 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center font-bold text-xs">
+                {(courseCode || 'CS').slice(0, 2)}
+              </div>
+              <div>
+                <p className="text-xs font-mono font-bold text-brand-700">{courseCode || 'Course'}</p>
+                <p className="text-xs font-semibold text-slate-800">{courseName || 'Classroom Session'}</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-brand-700 bg-white px-2 py-0.5 rounded border border-brand-200">
+              Current Classroom
+            </span>
+          </div>
+        ) : courses.length > 0 ? (
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Select Course & Cohort
