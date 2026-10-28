@@ -1,22 +1,41 @@
 import React from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PrototypeBanner } from '@/components/ui/PrototypeBanner';
+import { useAuth } from '@/context/AuthContext';
 import { 
   BookOpen, 
   LayoutDashboard, 
   CheckCircle2, 
   CalendarDays, 
-  ArrowLeft 
+  ArrowLeft,
+  LogOut
 } from 'lucide-react';
 
 export const StudentLayout: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { profile, user, signOut } = useAuth();
 
   const navItems = [
     { label: 'My Attendance', href: '/student', icon: LayoutDashboard },
     { label: 'Check-In Terminal', href: '/student/checkin', icon: CheckCircle2 },
     { label: 'Class Schedule', href: '/student/schedule', icon: CalendarDays },
   ];
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
+
+  const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Enrolled Student';
+  const displayRoll = profile?.institution_id ? `Roll: ${profile.institution_id}` : user?.email || 'Student Portal';
+  const initials = displayName
+    .split(' ')
+    .map((n) => n[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'ST';
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
@@ -42,12 +61,20 @@ export const StudentLayout: React.FC = () => {
 
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-semibold text-slate-800">Alex Rivera</p>
-              <p className="text-[11px] text-slate-500">Roll: CS-2024-042</p>
+              <p className="text-xs font-semibold text-slate-800">{displayName}</p>
+              <p className="text-[11px] text-slate-500">{displayRoll}</p>
             </div>
             <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center justify-center font-semibold text-xs">
-              AR
+              {initials}
             </div>
+            <button
+              onClick={handleSignOut}
+              className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-lg hover:bg-slate-100"
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>

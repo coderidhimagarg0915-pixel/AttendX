@@ -1,18 +1,22 @@
 import React from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PrototypeBanner } from '@/components/ui/PrototypeBanner';
+import { useAuth } from '@/context/AuthContext';
 import { 
   GraduationCap, 
   LayoutDashboard, 
   Users, 
   ClipboardCheck, 
   FileText, 
-  Settings,
-  ArrowLeft
+  Settings, 
+  ArrowLeft,
+  LogOut
 } from 'lucide-react';
 
 export const TeacherLayout: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { profile, user, signOut } = useAuth();
 
   const navItems = [
     { label: 'Overview', href: '/teacher', icon: LayoutDashboard },
@@ -21,6 +25,21 @@ export const TeacherLayout: React.FC = () => {
     { label: 'Attendance Reports', href: '/teacher/reports', icon: FileText },
     { label: 'Course Settings', href: '/teacher/settings', icon: Settings },
   ];
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
+
+  const displayName = profile?.full_name || user?.email?.split('@')[0] || 'Faculty Member';
+  const displayDepartment = profile?.department || profile?.institution_id || 'Dept. of Computer Science';
+  const initials = displayName
+    .split(' ')
+    .map((n) => n[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || 'FA';
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800">
@@ -46,12 +65,20 @@ export const TeacherLayout: React.FC = () => {
 
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
-              <p className="text-xs font-semibold text-slate-800">Dr. Sarah Jenkins</p>
-              <p className="text-[11px] text-slate-500">Dept. of Computer Science</p>
+              <p className="text-xs font-semibold text-slate-800">{displayName}</p>
+              <p className="text-[11px] text-slate-500">{displayDepartment}</p>
             </div>
-            <div className="w-9 h-9 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center font-semibold text-slate-600 text-xs">
-              SJ
+            <div className="w-9 h-9 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center font-semibold text-indigo-700 text-xs">
+              {initials}
             </div>
+            <button
+              onClick={handleSignOut}
+              className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-lg hover:bg-slate-100"
+              title="Sign Out"
+              aria-label="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>

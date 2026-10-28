@@ -45,6 +45,7 @@ export interface Database {
           department?: string | null;
           updated_at?: string;
         };
+        Relationships: [];
       };
       courses: {
         Row: {
@@ -73,6 +74,7 @@ export interface Database {
           semester?: string;
           academic_year?: string;
         };
+        Relationships: [];
       };
       enrollments: {
         Row: {
@@ -92,6 +94,7 @@ export interface Database {
           course_id?: string;
           student_id?: string;
         };
+        Relationships: [];
       };
       attendance_sessions: {
         Row: {
@@ -123,6 +126,7 @@ export interface Database {
           token_hash?: string | null;
           expires_at?: string | null;
         };
+        Relationships: [];
       };
       attendance_records: {
         Row: {
@@ -157,7 +161,33 @@ export interface Database {
           user_agent?: string | null;
           verified_at?: string | null;
         };
+        Relationships: [];
       };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      submit_student_attendance: {
+        Args: {
+          p_session_id: string;
+          p_submitted_code: string;
+        };
+        Returns: Json;
+      };
+      current_user_role: {
+        Args: Record<PropertyKey, never>;
+        Returns: UserRole;
+      };
+    };
+    Enums: {
+      user_role: UserRole;
+      attendance_status: AttendanceStatus;
+      session_state: SessionState;
+      verification_state: VerificationState;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
     };
   };
 }
