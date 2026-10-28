@@ -165,16 +165,36 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         });
 
         if (!error && data?.success) {
+          setIsSubmitting(false);
           onVerificationComplete({
             success: true,
-            message: `Attendance verified via Biometric Face Match for ${courseCode}!`,
+            message: `Attendance verified via Biometric Face Match for ${courseCode || sessionCode}!`,
           });
           onClose();
           return;
+        } else if (data && data.success === false) {
+          setIsSubmitting(false);
+          onVerificationComplete({
+            success: false,
+            message: `Attendance Verification Rejected: ${data.error || 'Invalid session code or enrollment.'}`,
+          });
+          onClose();
+          return;
+        } else if (error) {
+          console.warn('[FaceVerificationModal] RPC error:', error);
+          if (error.message?.includes('permission denied') || error.message?.includes('Unauthorized')) {
+            setIsSubmitting(false);
+            onVerificationComplete({
+              success: false,
+              message: 'Session check-in failed: Student authentication is required.',
+            });
+            onClose();
+            return;
+          }
         }
       }
 
-      // If RLS requires authentication or session is local:
+      // Fallback for demo / offline simulation:
       setTimeout(() => {
         setIsSubmitting(false);
         onVerificationComplete({
@@ -184,9 +204,10 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         onClose();
       }, 700);
     } catch (err: any) {
+      setIsSubmitting(false);
       onVerificationComplete({
-        success: true,
-        message: `Biometric face verified successfully for session ${sessionCode}!`,
+        success: false,
+        message: err?.message || 'Verification could not be completed. Please try again.',
       });
       onClose();
     }

@@ -108,10 +108,44 @@ export const TeacherDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [activeSession]);
 
+  // Real-time Supabase attendance listener for active session
+  useEffect(() => {
+    if (!activeSession || !isSupabaseConfigured) return;
+
+    // 1. Initial fetch of attendees from Supabase
+    sessionService.fetchSessionAttendees(activeSession.id).then((attendees) => {
+      if (attendees.length > 0) {
+        setRoster(attendees);
+      }
+    });
+
+    // 2. Realtime WebSocket subscription for live student check-ins
+    const channel = (supabase as any)
+      .channel(`attendance-realtime-${activeSession.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'attendance_records',
+          filter: `session_id=eq.${activeSession.id}`,
+        },
+        () => {
+          sessionService.fetchSessionAttendees(activeSession.id).then((freshAttendees) => {
+            setRoster(freshAttendees);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      (supabase as any).removeChannel(channel);
+    };
+  }, [activeSession?.id]);
+
   // Handler: New Real Session Created
   const handleSessionCreated = (newSession: AttendanceSessionData) => {
     setActiveSession(newSession);
-    // Real roster starts fresh with 0 attendees until students scan & verify
     setRoster([]);
   };
 
@@ -128,6 +162,7 @@ export const TeacherDashboard: React.FC = () => {
   const handleRotateOtp = () => {
     if (!activeSession) return;
     const newCode = generateSessionCode(activeSession.courseCode);
+    sessionService.rotateSessionCode(activeSession.id, newCode);
     setActiveSession({
       ...activeSession,
       code: newCode,
@@ -146,10 +181,13 @@ export const TeacherDashboard: React.FC = () => {
   };
 
   // Handler: Manual Override Confirmed
-  const handleOverrideConfirmed = (studentId: string, newStatus: AttendanceStatus, reason: string) => {
+  const handleOverrideConfirmed = async (studentId: string, newStatus: AttendanceStatus, reason: string) => {
+    if (activeSession) {
+      await sessionService.overrideAttendance(activeSession.id, studentId, newStatus, reason);
+    }
     setRoster((prev) =>
       prev.map((s) => {
-        if (s.id === studentId) {
+        if (s.id === studentId || s.studentId === studentId) {
           return {
             ...s,
             status: newStatus,
@@ -612,6 +650,9 @@ export const TeacherDashboard: React.FC = () => {
         session={activeSession}
         timeLeftFormatted={timeLeftFormatted}
         onCodeRotated={(newCode) => {
+          if (activeSession) {
+            sessionService.rotateSessionCode(activeSession.id, newCode);
+          }
           setActiveSession((prev) => (prev ? { ...prev, code: newCode } : null));
         }}
       />
