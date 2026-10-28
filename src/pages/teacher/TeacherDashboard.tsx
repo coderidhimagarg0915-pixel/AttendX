@@ -9,8 +9,7 @@ import {
   AlertTriangle, 
   Play, 
   Square, 
-  ExternalLink,
-  Search,
+  Search, 
   Filter
 } from 'lucide-react';
 
