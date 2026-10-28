@@ -1,318 +1,253 @@
-import React, { useState } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { 
-  Users, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
-  Play, 
-  Square, 
-  Search, 
-  Filter
+import { CreateCourseModal } from '@/components/teacher/CreateCourseModal';
+import { sessionService, Course } from '@/services/sessionService';
+import { useAuth } from '@/context/AuthContext';
+import {
+  BookOpen, Users, CalendarDays, Plus, ChevronRight, GraduationCap,
+  Search, TrendingDown, Play, RefreshCw, Copy, Check
 } from 'lucide-react';
 
-interface MockSession {
-  id: string;
-  courseCode: string;
-  courseName: string;
-  room: string;
-  isActive: boolean;
-  code: string;
-  enrolled: number;
-  present: number;
-  startTime: string;
-}
+const courseColorPalette = [
+  'from-violet-600 to-purple-700',
+  'from-blue-600 to-indigo-700',
+  'from-emerald-600 to-teal-700',
+  'from-rose-600 to-pink-700',
+  'from-amber-500 to-orange-600',
+  'from-sky-600 to-cyan-700',
+];
 
 export const TeacherDashboard: React.FC = () => {
-  const [activeSession, setActiveSession] = useState<MockSession | null>({
-    id: 'sess-101',
-    courseCode: 'CS301',
-    courseName: 'Distributed Computing Systems',
-    room: 'Hall B-204',
-    isActive: true,
-    code: 'DIST-849',
-    enrolled: 48,
-    present: 42,
-    startTime: '10:00 AM',
+  const { profile } = useAuth();
+  const navigate = useNavigate();
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const loadCourses = async () => {
+    setIsLoading(true);
+    const data = await sessionService.getCourses();
+    setCourses(data);
+    setIsLoading(false);
+  };
+
+  useEffect(() => { loadCourses(); }, []);
+
+  const handleCourseCreated = (course: Course) => {
+    setCourses((prev) => [course, ...prev]);
+  };
+
+  const handleCopyCode = (e: React.MouseEvent, courseId: string, joinCode: string) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(joinCode);
+    setCopiedId(courseId);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const firstName = profile?.full_name?.split(' ')[0] || 'Professor';
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  const filtered = courses.filter((c) => {
+    const q = search.toLowerCase();
+    return c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || c.semester.toLowerCase().includes(q);
   });
 
-  const [studentRosterFilter, setStudentRosterFilter] = useState('');
-
-  const mockStudents = [
-    { id: '1', roll: 'CS-24-001', name: 'Aarav Sharma', status: 'present', time: '10:02 AM', method: 'Dynamic OTP' },
-    { id: '2', roll: 'CS-24-002', name: 'Ananya Iyer', status: 'present', time: '10:03 AM', method: 'Dynamic OTP' },
-    { id: '3', roll: 'CS-24-003', name: 'David Miller', status: 'late', time: '10:14 AM', method: 'Manual Verify' },
-    { id: '4', roll: 'CS-24-004', name: 'Emily Chen', status: 'present', time: '10:01 AM', method: 'Dynamic OTP' },
-    { id: '5', roll: 'CS-24-005', name: 'Farhan Zaidi', status: 'absent', time: '-', method: 'Unreported' },
-    { id: '6', roll: 'CS-24-006', name: 'Priya Patel', status: 'present', time: '10:05 AM', method: 'Dynamic OTP' },
-  ];
-
-  const filteredStudents = mockStudents.filter(
-    (s) =>
-      s.name.toLowerCase().includes(studentRosterFilter.toLowerCase()) ||
-      s.roll.toLowerCase().includes(studentRosterFilter.toLowerCase())
-  );
+  const totalStudents = courses.reduce((acc, c) => acc + c.enrolledCount, 0);
 
   return (
-    <div className="space-y-6">
-      {/* Page Title & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
+    <div className="space-y-8">
+      {/* Welcome Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Faculty Dashboard</h1>
-          <p className="text-sm text-slate-500">Monitor active classroom sessions and audit attendance logs.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            Download Report (.CSV)
-          </Button>
-          <Button variant="primary" size="sm">
-            + Schedule New Session
-          </Button>
-        </div>
-      </div>
-
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card padding="sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Assigned Courses</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">4</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-slate-500">Total 184 active enrollments</div>
-        </Card>
-
-        <Card padding="sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Avg. Semester Attendance</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">87.5%</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <CheckCircle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-emerald-600 font-medium">+2.1% higher than department benchmark</div>
-        </Card>
-
-        <Card padding="sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Attendance Defaulters (&lt;75%)</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">8</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-rose-600 font-medium">Automatic alerts dispatched</div>
-        </Card>
-
-        <Card padding="sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Live Active Sessions</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{activeSession ? '1 Active' : 'None'}</p>
-            </div>
-            <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-slate-500">Session room: Hall B-204</div>
-        </Card>
-      </div>
-
-      {/* Active Session Management Box */}
-      {activeSession ? (
-        <Card className="border-brand-200 bg-brand-50/20">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-brand-100">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                </span>
-                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Live Attendance Window Open</span>
-                <Badge variant="info">Room {activeSession.room}</Badge>
-              </div>
-              <h2 className="text-xl font-bold text-slate-900">
-                {activeSession.courseCode} — {activeSession.courseName}
-              </h2>
-              <p className="text-xs text-slate-500">
-                Started at {activeSession.startTime} • Auto-expires in 11 minutes
-              </p>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="bg-white px-4 py-2 rounded-lg border border-slate-200 text-center shadow-sm">
-                <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider block">Student Check-In Code</span>
-                <span className="text-2xl font-mono font-extrabold tracking-widest text-brand-700">{activeSession.code}</span>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setActiveSession(null)}
-                className="gap-1.5"
-              >
-                <Square className="w-4 h-4" />
-                Close Session
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white p-4 rounded-lg border border-slate-200/80">
-              <p className="text-xs text-slate-500 font-medium">Verified Attendees</p>
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="text-3xl font-extrabold text-slate-900">{activeSession.present}</span>
-                <span className="text-sm text-slate-500">/ {activeSession.enrolled} enrolled</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 mt-3 overflow-hidden">
-                <div
-                  className="bg-brand-600 h-2 rounded-full transition-all"
-                  style={{ width: `${(activeSession.present / activeSession.enrolled) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg border border-slate-200/80">
-              <p className="text-xs text-slate-500 font-medium">Live Attendance Quorum</p>
-              <div className="mt-2 text-3xl font-extrabold text-emerald-600">
-                {Math.round((activeSession.present / activeSession.enrolled) * 100)}%
-              </div>
-              <p className="mt-3 text-xs text-slate-500">Threshold: 75% quorum requirement met</p>
-            </div>
-
-            <div className="bg-white p-4 rounded-lg border border-slate-200/80 flex flex-col justify-between">
-              <div>
-                <p className="text-xs text-slate-500 font-medium">Security Validation Policy</p>
-                <p className="text-xs text-slate-700 mt-1">
-                  Enforces one submission per student per session with audit IP stamping.
-                </p>
-              </div>
-              <div className="mt-2">
-                <Badge variant="success">Server Row-Level Security Enforced</Badge>
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : (
-        <Card className="text-center py-8">
-          <Clock className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-          <h3 className="text-base font-semibold text-slate-900">No Active Attendance Session</h3>
-          <p className="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-4">
-            Select a class below or launch a new dynamic check-in code session for students.
+          <p className="text-sm text-slate-500 font-medium">{greeting},</p>
+          <h1 className="text-2xl font-black text-slate-900">{firstName} 👋</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            {courses.length} course{courses.length !== 1 ? 's' : ''} · {totalStudents} total students enrolled
           </p>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() =>
-              setActiveSession({
-                id: 'sess-102',
-                courseCode: 'CS301',
-                courseName: 'Distributed Computing Systems',
-                room: 'Hall B-204',
-                isActive: true,
-                code: 'DIST-' + Math.floor(100 + Math.random() * 900),
-                enrolled: 48,
-                present: 0,
-                startTime: 'Now',
-              })
-            }
-          >
-            <Play className="w-4 h-4 mr-1.5" />
-            Launch CS301 Attendance Session
-          </Button>
-        </Card>
+        </div>
+        <Button
+          variant="primary"
+          size="md"
+          onClick={() => setIsCreateModalOpen(true)}
+          className="gap-2 shadow-lg shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          Create Course
+        </Button>
+      </div>
+
+      {/* Summary Stats */}
+      {courses.length > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: 'Courses', value: courses.length, icon: BookOpen, color: 'text-brand-700 bg-brand-50' },
+            { label: 'Students', value: totalStudents, icon: Users, color: 'text-emerald-700 bg-emerald-50' },
+            { label: 'At Risk (<75%)', value: '—', icon: TrendingDown, color: 'text-amber-700 bg-amber-50', note: 'Click a course to see details' },
+          ].map(({ label, value, icon: Icon, color, note }) => (
+            <Card key={label} className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-xl font-black text-slate-900">{value}</div>
+                <div className="text-xs text-slate-500">{label}</div>
+                {note && <div className="text-[10px] text-slate-400">{note}</div>}
+              </div>
+            </Card>
+          ))}
+        </div>
       )}
 
-      {/* Live Roster Audit Table */}
-      <Card>
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <CardTitle>Session Real-Time Verification Audit</CardTitle>
-            <CardDescription>
-              Live stream of student check-ins with server validation status.
-            </CardDescription>
+      {/* Search bar */}
+      {courses.length > 3 && (
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search courses by name, code, or semester..."
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+          />
+        </div>
+      )}
+
+      {/* Course Grid */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-52 rounded-2xl bg-slate-100 animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-brand-100 to-indigo-100 flex items-center justify-center mb-4">
+            <GraduationCap className="w-10 h-10 text-brand-600" />
           </div>
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search roll number or name..."
-                value={studentRosterFilter}
-                onChange={(e) => setStudentRosterFilter(e.target.value)}
-                className="pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 w-56"
-              />
-            </div>
-            <Button variant="outline" size="sm" className="gap-1 text-xs">
-              <Filter className="w-3.5 h-3.5" />
-              Filter
+          <h3 className="text-lg font-black text-slate-900">
+            {courses.length === 0 ? 'Create your first classroom' : 'No courses match your search'}
+          </h3>
+          <p className="text-sm text-slate-500 max-w-sm mt-2 mb-6">
+            {courses.length === 0
+              ? 'Set up a Google Classroom-style course. Students join with a shareable code and you launch attendance sessions inside.'
+              : 'Try adjusting your search query.'}
+          </p>
+          {courses.length === 0 && (
+            <Button variant="primary" size="md" onClick={() => setIsCreateModalOpen(true)} className="gap-2 shadow-lg">
+              <Plus className="w-4 h-4" />
+              Create Your First Course
             </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600">
-              <thead className="bg-slate-50 text-slate-700 text-xs uppercase font-semibold border-y border-slate-200">
-                <tr>
-                  <th scope="col" className="px-6 py-3">Roll Number</th>
-                  <th scope="col" className="px-6 py-3">Student Name</th>
-                  <th scope="col" className="px-6 py-3">Verification Timestamp</th>
-                  <th scope="col" className="px-6 py-3">Method</th>
-                  <th scope="col" className="px-6 py-3">Status</th>
-                  <th scope="col" className="px-6 py-3 text-right">Faculty Override</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {filteredStudents.length > 0 ? (
-                  filteredStudents.map((st) => (
-                    <tr key={st.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="px-6 py-3.5 font-mono text-xs font-semibold text-slate-900">
-                        {st.roll}
-                      </td>
-                      <td className="px-6 py-3.5 font-medium text-slate-900">
-                        {st.name}
-                      </td>
-                      <td className="px-6 py-3.5 text-xs text-slate-500">
-                        {st.time}
-                      </td>
-                      <td className="px-6 py-3.5 text-xs">
-                        <span className="font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                          {st.method}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3.5">
-                        {st.status === 'present' && <Badge variant="success">Present</Badge>}
-                        {st.status === 'late' && <Badge variant="warning">Late (12 min)</Badge>}
-                        {st.status === 'absent' && <Badge variant="danger">Absent</Badge>}
-                      </td>
-                      <td className="px-6 py-3.5 text-right">
-                        <button className="text-xs font-medium text-brand-600 hover:text-brand-800 transition-colors">
-                          Modify
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-slate-400 text-sm">
-                      No student records match the search filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filtered.map((course, idx) => {
+            const gradient = courseColorPalette[idx % courseColorPalette.length];
+            return (
+              <button
+                key={course.id}
+                onClick={() => navigate(`/teacher/classroom/${course.id}`)}
+                className="text-left rounded-2xl overflow-hidden border border-slate-200/80 shadow-card hover:shadow-md transition-all duration-200 group focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+              >
+                {/* Colorful top header */}
+                <div className={`bg-gradient-to-br ${gradient} p-5 relative overflow-hidden`}>
+                  {/* Decorative circles */}
+                  <div className="absolute -top-4 -right-4 w-24 h-24 rounded-full bg-white/10" />
+                  <div className="absolute -bottom-6 -right-2 w-32 h-32 rounded-full bg-white/10" />
+
+                  <div className="relative">
+                    <span className="text-[10px] font-bold tracking-widest text-white/70 uppercase">{course.semester} · {course.academicYear}</span>
+                    <div className="flex items-start justify-between mt-1 gap-2">
+                      <div>
+                        <p className="text-white font-mono font-black text-lg tracking-wider">{course.code}</p>
+                        <h3 className="text-white font-bold text-sm leading-snug mt-0.5 line-clamp-2">{course.name}</h3>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Body */}
+                <div className="bg-white p-4 space-y-3">
+                  {/* Stats row */}
+                  <div className="flex items-center gap-4 text-xs text-slate-600">
+                    <span className="flex items-center gap-1.5 font-semibold">
+                      <Users className="w-3.5 h-3.5 text-slate-400" />
+                      {course.enrolledCount} students
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                      {course.totalSessions} sessions
+                    </span>
+                  </div>
+
+                  {/* Join code */}
+                  {course.joinCode && (
+                    <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 border border-dashed border-slate-200">
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Join Code</p>
+                        <span className="font-mono font-black tracking-widest text-slate-800 text-sm">{course.joinCode}</span>
+                      </div>
+                      <button
+                        onClick={(e) => handleCopyCode(e, course.id, course.joinCode!)}
+                        className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors text-slate-500"
+                        title="Copy join code"
+                      >
+                        {copiedId === course.id ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Open button */}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="flex items-center gap-1 text-xs text-brand-600 font-bold group-hover:gap-2 transition-all">
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      Open Classroom
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-brand-500 group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+
+          {/* Create new card */}
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="rounded-2xl border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center gap-3 text-slate-400 hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50/30 transition-all min-h-[200px] group focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-slate-100 group-hover:bg-brand-100 flex items-center justify-center transition-colors">
+              <Plus className="w-6 h-6" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-bold">New Course</p>
+              <p className="text-xs mt-0.5">Create another classroom</p>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Refresh button */}
+      {courses.length > 0 && (
+        <div className="flex justify-center pt-2">
+          <button onClick={loadCourses} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh courses
+          </button>
+        </div>
+      )}
+
+      {/* Create Course Modal */}
+      <CreateCourseModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCourseCreated={handleCourseCreated}
+      />
     </div>
   );
 };

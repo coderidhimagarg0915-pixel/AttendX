@@ -9,6 +9,7 @@ import { GoogleRoleSetupPage } from './pages/GoogleRoleSetupPage';
 import { TeacherLayout } from './layouts/TeacherLayout';
 import { StudentLayout } from './layouts/StudentLayout';
 import { TeacherDashboard } from './pages/teacher/TeacherDashboard';
+import { ClassroomPage } from './pages/teacher/ClassroomPage';
 import { StudentDashboard } from './pages/student/StudentDashboard';
 
 export const App: React.FC = () => {
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
             }
           >
             <Route index element={<TeacherDashboard />} />
+            <Route path="classroom/:courseId" element={<ClassroomPage />} />
             <Route path="sessions" element={<TeacherDashboard />} />
             <Route path="roster" element={<TeacherDashboard />} />
             <Route path="reports" element={<TeacherDashboard />} />
