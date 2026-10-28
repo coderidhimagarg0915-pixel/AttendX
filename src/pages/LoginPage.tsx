@@ -42,6 +42,16 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Display errors or messages passed via router state or search params
+  React.useEffect(() => {
+    const state = location.state as { error?: string; message?: string } | null;
+    if (state?.error) {
+      setErrorMessage(state.error);
+    } else if (state?.message) {
+      setSuccessMessage(state.message);
+    }
+  }, [location.state]);
+
   // Get original redirect target if user was bounced from a protected route
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
 

@@ -42,47 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return typedProfile;
       }
 
-      // Self-heal: If profile row is missing from public.profiles, create it right now from auth user metadata!
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser && currentUser.id === userId) {
-        const meta = currentUser.user_metadata || {};
-        const fallbackRole = (meta.role as UserRole) || 'student';
-        const fallbackName = meta.full_name || currentUser.email?.split('@')[0] || 'User';
-
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .upsert(
-            {
-              id: userId,
-              email: currentUser.email || '',
-              full_name: fallbackName,
-              role: fallbackRole,
-              institution_id: meta.institution_id || null,
-            },
-            { onConflict: 'id' }
-          )
-          .select('*')
-          .single();
-
-        if (newProfile && !createError) {
-          const typedProfile: UserProfile = {
-            id: newProfile.id,
-            email: newProfile.email,
-            full_name: newProfile.full_name,
-            role: newProfile.role as UserRole,
-            avatar_url: newProfile.avatar_url,
-            institution_id: newProfile.institution_id,
-            department: newProfile.department,
-            created_at: newProfile.created_at,
-            updated_at: newProfile.updated_at,
-          };
-          setProfile(typedProfile);
-          setRole(typedProfile.role);
-          return typedProfile;
-        }
-      }
-
-      console.warn('[AuthContext] Could not resolve or create profile for user:', userId);
+      // If no row exists in public.profiles, user has not registered
       return null;
     } catch (err) {
       console.error('[AuthContext] Unexpected error fetching profile:', err);
@@ -105,8 +65,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
 
       if (session?.user) {
-        setUser(session.user);
-        await fetchProfile(session.user.id);
+        const userProfile = await fetchProfile(session.user.id);
+        if (userProfile) {
+          setUser(session.user);
+        } else {
+          // If no profile exists, sign out to prevent ghost/unregistered sessions
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          setRole(null);
+        }
       } else {
         setUser(null);
         setProfile(null);
@@ -122,12 +90,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (session?.user) {
-          setUser(session.user);
-          const metaRole = session.user.user_metadata?.role as UserRole | undefined;
-          if (metaRole) {
-            setRole(metaRole);
+          const userProfile = await fetchProfile(session.user.id);
+          if (userProfile) {
+            setUser(session.user);
+            setRole(userProfile.role);
           }
-          await fetchProfile(session.user.id);
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -169,8 +136,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await new Promise((r) => setTimeout(r, 400));
           resolvedProfile = await fetchProfile(data.user.id);
         }
+
+        // Block sign-in if no profile exists — the user is not properly registered
+        if (!resolvedProfile) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          setRole(null);
+          setIsLoading(false);
+          return {
+            error: new Error(
+              'No account found for this email. Please register first using the New Registration tab.'
+            ),
+          };
+        }
+
         setIsLoading(false);
-        return { error: null, role: resolvedProfile?.role || metaRole };
+        return { error: null, role: resolvedProfile.role };
       }
 
       setIsLoading(false);
