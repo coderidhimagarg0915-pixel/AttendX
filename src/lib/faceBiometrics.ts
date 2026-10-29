@@ -4,7 +4,14 @@ let modelsLoaded = false;
 let loadPromise: Promise<void> | null = null;
 
 /**
- * Loads face detection, landmarks, and recognition models from /models
+ * Strict distance threshold for 128-d L2-normalized FaceRecognitionNet embeddings.
+ * Euclidean distance < 0.42 provides high-confidence zero-proxy verification.
+ * Different persons typically produce distance >= 0.50 (average 0.60 - 0.85).
+ */
+export const STRICT_MATCH_THRESHOLD = 0.42;
+
+/**
+ * Loads face detection, high-resolution landmarks, and recognition models from /models
  */
 export async function loadFaceDetectionModels(): Promise<void> {
   if (modelsLoaded) return;
@@ -15,6 +22,7 @@ export async function loadFaceDetectionModels(): Promise<void> {
     try {
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       ]);
@@ -34,76 +42,124 @@ export interface FaceScanResult {
   message: string;
   descriptor?: number[];
   alignedFaceCanvas?: HTMLCanvasElement;
+  multipleFaces?: boolean;
 }
 
+export type FaceInputMedia = HTMLVideoElement | HTMLImageElement | HTMLCanvasElement;
+
 /**
- * Analyzes video element frame to find single centered face & extract 128-d descriptor
+ * Analyzes video or image frame to find a single centered face and extract 128-d descriptor.
+ * Rejects frames with multiple faces (anti-proxy protection) or no faces.
  */
 export async function detectSingleFaceDescriptor(
-  videoElement: HTMLVideoElement
+  input: FaceInputMedia
 ): Promise<FaceScanResult> {
   if (!modelsLoaded) {
     await loadFaceDetectionModels();
   }
 
-  const detection = await faceapi
-    .detectSingleFace(
-      videoElement,
-      new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
-    )
-    .withFaceLandmarks(true)
-    .withFaceDescriptor();
+  // Detect ALL faces to prevent proxy spoofing (e.g. holding a photo while student is present)
+  let detections: any[];
+  try {
+    detections = await faceapi
+      .detectAllFaces(
+        input,
+        new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 })
+      )
+      .withFaceLandmarks(false)
+      .withFaceDescriptors();
+  } catch {
+    // Fallback with tiny landmarks if standard landmark net encounters format issues
+    try {
+      detections = await faceapi
+        .detectAllFaces(
+          input,
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.45 })
+        )
+        .withFaceLandmarks(true)
+        .withFaceDescriptors();
+    } catch (err) {
+      console.error('[FaceBiometrics] Face detection error:', err);
+      return {
+        detected: false,
+        message: 'Could not process video frame. Ensure camera is unobstructed.',
+      };
+    }
+  }
 
-  if (!detection) {
+  if (!detections || detections.length === 0) {
     return {
       detected: false,
-      message: 'No face detected. Look directly into the camera.',
+      message: 'No face detected. Please look directly into the camera.',
     };
   }
 
-  const { box } = detection.detection;
-  const videoWidth = videoElement.videoWidth || 640;
-  const videoHeight = videoElement.videoHeight || 480;
+  // Anti-proxy check: Reject if multiple individuals are detected in camera frame
+  if (detections.length > 1) {
+    return {
+      detected: false,
+      message: 'Multiple faces detected! Only the enrolled student must be in view.',
+      multipleFaces: true,
+    };
+  }
 
-  // Basic check: face should be reasonably centered and large enough
+  const detection = detections[0];
+  const { box } = detection.detection;
+
+  // Retrieve proper element dimensions across video, image, or canvas
+  let inputWidth = 640;
+  let inputHeight = 480;
+
+  if (typeof HTMLVideoElement !== 'undefined' && input instanceof HTMLVideoElement) {
+    inputWidth = input.videoWidth || 640;
+    inputHeight = input.videoHeight || 480;
+  } else if (typeof HTMLImageElement !== 'undefined' && input instanceof HTMLImageElement) {
+    inputWidth = input.naturalWidth || input.width || 640;
+    inputHeight = input.naturalHeight || input.height || 480;
+  } else if (typeof HTMLCanvasElement !== 'undefined' && input instanceof HTMLCanvasElement) {
+    inputWidth = input.width || 640;
+    inputHeight = input.height || 480;
+  }
+
+  // Check face coverage inside frame
   const boxArea = box.width * box.height;
-  const frameArea = videoWidth * videoHeight;
+  const frameArea = inputWidth * inputHeight;
   const coverage = boxArea / frameArea;
 
-  if (coverage < 0.05) {
+  if (coverage < 0.03) {
     return {
       detected: false,
-      message: 'Please move closer to the camera.',
+      message: 'Face is too far away. Please move closer to the camera.',
     };
   }
 
-  if (coverage > 0.65) {
+  if (coverage > 0.85) {
     return {
       detected: false,
-      message: 'Please move slightly back from the camera.',
+      message: 'Face is too close. Please move slightly back from the camera.',
     };
   }
 
-  // Convert Float32Array (128 elements) to standard number array for JSON storage
-  const descriptorArray = Array.from(detection.descriptor);
+  // Convert Float32Array (128 elements) to standard number array for storage & JSON serialization
+  const descriptorArray = Array.from(detection.descriptor) as number[];
 
   return {
     detected: true,
-    message: 'Face aligned! Hold still to capture.',
+    message: 'Face aligned! Hold still to complete biometric check.',
     descriptor: descriptorArray,
   };
 }
 
 /**
- * Calculates Euclidean distance between two face descriptors.
- * Typically distance < 0.45 or 0.5 indicates a valid match.
+ * Calculates Euclidean distance between two 128-d face descriptors.
+ * Typically distance < 0.42 indicates a high-confidence biometric match.
  */
 export function calculateFaceMatchDistance(
   descriptor1: number[],
   descriptor2: number[]
 ): number {
-  if (descriptor1.length !== descriptor2.length) {
-    throw new Error('Face descriptors must have matching dimensions');
+  if (!descriptor1 || !descriptor2 || descriptor1.length !== descriptor2.length) {
+    throw new Error('Face descriptors must have matching 128 dimensions');
   }
   let sum = 0;
   for (let i = 0; i < descriptor1.length; i++) {
@@ -113,6 +169,25 @@ export function calculateFaceMatchDistance(
     sum += diff * diff;
   }
   return Math.sqrt(sum);
+}
+
+/**
+ * Computes calibrated match similarity percentage from Euclidean distance.
+ * Returns 75% - 100% for valid biometric matches (< STRICT_MATCH_THRESHOLD).
+ * Drops sharply towards 0% for mismatches (>= STRICT_MATCH_THRESHOLD).
+ */
+export function computeMatchSimilarity(
+  distance: number,
+  threshold = STRICT_MATCH_THRESHOLD
+): number {
+  if (distance <= 0) return 100;
+  if (distance <= threshold) {
+    // 0 to threshold maps to 100% -> 75%
+    return Math.round(100 - (distance / threshold) * 25);
+  }
+  // Above threshold drops rapidly from 75% down to 0% at distance >= 0.75
+  const drop = ((distance - threshold) / (0.75 - threshold)) * 75;
+  return Math.max(0, Math.round(75 - drop));
 }
 
 /**
@@ -144,6 +219,6 @@ export function captureVideoSnapshotBlob(videoElement: HTMLVideoElement): Promis
 
     canvas.toBlob((blob) => {
       resolve(blob);
-    }, 'image/jpeg', 0.82);
+    }, 'image/jpeg', 0.85);
   });
 }

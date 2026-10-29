@@ -40,10 +40,6 @@ export const App: React.FC = () => {
           >
             <Route index element={<TeacherDashboard />} />
             <Route path="classroom/:courseId" element={<ClassroomPage />} />
-            <Route path="sessions" element={<TeacherDashboard />} />
-            <Route path="roster" element={<TeacherDashboard />} />
-            <Route path="reports" element={<TeacherDashboard />} />
-            <Route path="settings" element={<TeacherDashboard />} />
           </Route>
 
           {/* Student Dashboard Routes (Protected) */}
@@ -56,8 +52,6 @@ export const App: React.FC = () => {
             }
           >
             <Route index element={<StudentDashboard />} />
-            <Route path="checkin" element={<StudentDashboard />} />
-            <Route path="schedule" element={<StudentDashboard />} />
           </Route>
 
           {/* Catch-all fallback */}

@@ -27,8 +27,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (data) {
         // Guard against uncompleted/unregistered OAuth accounts:
-        // When a user signs in via Google OAuth without registering, Supabase DB trigger may have
-        // auto-inserted a stub with no institution_id, no face_embedding, and no user_metadata role.
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         const isGoogleUser = currentUser?.app_metadata?.provider === 'google' ||
                              currentUser?.identities?.some((id) => id.provider === 'google');
@@ -42,15 +40,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return null;
         }
 
+        // Robust parsing of face_embedding (handles array, JSON string, or local backup)
+        let parsedFaceEmbedding: number[] | null = null;
+        if (data.face_embedding) {
+          if (Array.isArray(data.face_embedding)) {
+            parsedFaceEmbedding = data.face_embedding.map(Number);
+          } else if (typeof data.face_embedding === 'string') {
+            try {
+              const parsed = JSON.parse(data.face_embedding);
+              if (Array.isArray(parsed)) {
+                parsedFaceEmbedding = parsed.map(Number);
+              }
+            } catch {
+              console.warn('[AuthContext] Failed to parse face_embedding string');
+            }
+          }
+        }
+
+        // Check local storage backup if face embedding is not in db
+        if (!parsedFaceEmbedding && typeof window !== 'undefined') {
+          try {
+            const localSaved = localStorage.getItem(`attendx_face_embedding_${data.id}`);
+            if (localSaved) {
+              const parsed = JSON.parse(localSaved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                parsedFaceEmbedding = parsed.map(Number);
+              }
+            }
+          } catch {}
+        }
+
+        let avatarUrl = data.avatar_url;
+        if (!avatarUrl && typeof window !== 'undefined') {
+          try {
+            const localAvatar = localStorage.getItem(`attendx_avatar_url_${data.id}`);
+            if (localAvatar) avatarUrl = localAvatar;
+          } catch {}
+        }
+
         const typedProfile: UserProfile = {
           id: data.id,
           email: data.email,
           full_name: data.full_name,
           role: data.role as UserRole,
-          avatar_url: data.avatar_url,
+          avatar_url: avatarUrl,
           institution_id: data.institution_id,
           department: data.department,
-          face_embedding: (data.face_embedding as unknown as number[]) || null,
+          face_embedding: parsedFaceEmbedding,
           face_registered_at: data.face_registered_at || null,
           created_at: data.created_at,
           updated_at: data.updated_at,
@@ -265,7 +301,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // 2. Call Supabase signUp with full metadata including avatar_url and face_embedding
-      // The handle_new_user database trigger inserts directly into public.profiles with avatar_url and face_embedding!
       const { data, error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password,
@@ -301,7 +336,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // 3. Dual-guarantee: Call save_registration_biometrics RPC function
         try {
-          await supabase.rpc('save_registration_biometrics', {
+          await (supabase as any).rpc('save_registration_biometrics', {
             p_user_id: data.user.id,
             p_avatar_url: avatarUrl || '',
             p_face_embedding: (faceEmbedding || null) as unknown as import('@/types/database').Json,
@@ -309,7 +344,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch {
           // If RPC is pending execution, fallback to direct update
           try {
-            await supabase
+            await (supabase as any)
               .from('profiles')
               .update({
                 avatar_url: avatarUrl,
@@ -321,6 +356,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch (updateErr) {
             console.warn('[AuthContext] Profile direct update exception:', updateErr);
           }
+        }
+
+        // Also save to localStorage backup
+        if (typeof window !== 'undefined' && faceEmbedding) {
+          try {
+            localStorage.setItem(`attendx_face_embedding_${data.user.id}`, JSON.stringify(faceEmbedding));
+            if (avatarUrl) {
+              localStorage.setItem(`attendx_avatar_url_${data.user.id}`, avatarUrl);
+            }
+          } catch {}
         }
 
         const userProfile = await fetchProfile(data.user.id);
@@ -336,7 +381,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateFaceBiometrics = async (
+    descriptor: number[],
+    avatarUrl?: string | undefined
+  ): Promise<{ error: Error | null }> => {
+    const currentUserId = user?.id || profile?.id;
+    if (!currentUserId) return { error: new Error('User not authenticated') };
 
+    try {
+      // 1. Try RPC call
+      try {
+        await (supabase as any).rpc('save_registration_biometrics', {
+          p_user_id: currentUserId,
+          p_avatar_url: avatarUrl || '',
+          p_face_embedding: descriptor as unknown as import('@/types/database').Json,
+        });
+      } catch {
+        // Fallback to direct update
+        await (supabase as any)
+          .from('profiles')
+          .update({
+            face_embedding: descriptor,
+            face_registered_at: new Date().toISOString(),
+            ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+          })
+          .eq('id', currentUserId);
+      }
+
+      // Persist in localStorage as dual-storage backup
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`attendx_face_embedding_${currentUserId}`, JSON.stringify(descriptor));
+          if (avatarUrl) {
+            localStorage.setItem(`attendx_avatar_url_${currentUserId}`, avatarUrl);
+          }
+        } catch {}
+      }
+
+      await refreshProfile();
+      return { error: null };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err : new Error('Failed to update face biometrics') };
+    }
+  };
 
   const verifyEmailOtp = async (
     email: string,
@@ -415,6 +502,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendVerificationEmail,
         signOut,
         refreshProfile,
+        updateFaceBiometrics,
       }}
     >
       {children}

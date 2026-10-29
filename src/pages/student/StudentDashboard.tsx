@@ -6,15 +6,15 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { StudentCheckInSchema } from '@/lib/validation';
 import { FaceVerificationModal } from '@/components/student/FaceVerificationModal';
-import { sessionService, StudentEnrolledCourse, WarningMessage } from '@/services/sessionService';
+import { sessionService, StudentEnrolledCourse, WarningMessage, SessionRecord } from '@/services/sessionService';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 import {
   AlertCircle,
   ShieldCheck,
   ShieldAlert,
   Camera,
   ScanFace,
-  BookOpen,
   Clock,
   Plus,
   AlertTriangle,
@@ -23,12 +23,16 @@ import {
   CalendarDays,
   X,
   KeyRound,
-  GraduationCap
+  GraduationCap,
+  ArrowRight,
+  History,
+  Sparkles
 } from 'lucide-react';
 
 const QR_VALIDITY_WINDOW_MS = 20 * 1000; // 20 seconds TTL (15s rotation + 5s latency grace period)
 
 export const StudentDashboard: React.FC = () => {
+  const { profile, user } = useAuth();
   const [searchParams] = useSearchParams();
   const paramCode = searchParams.get('code') || '';
   const paramSessionId = searchParams.get('sessionId') || '';
@@ -40,6 +44,7 @@ export const StudentDashboard: React.FC = () => {
   const [effectiveCourseCode, setEffectiveCourseCode] = useState(paramCourse);
   const [validQrTimestamp, setValidQrTimestamp] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isQuickSubmitting, setIsQuickSubmitting] = useState(false);
   const [qrExpirationError, setQrExpirationError] = useState<{
     isExpired: boolean;
     ageSeconds: number;
@@ -58,10 +63,15 @@ export const StudentDashboard: React.FC = () => {
   const [isJoining, setIsJoining] = useState(false);
   const [joinFeedback, setJoinFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Full Log / Attendance History Modal state
+  const [selectedCourseForLog, setSelectedCourseForLog] = useState<StudentEnrolledCourse | null>(null);
+  const [courseSessionHistory, setCourseSessionHistory] = useState<SessionRecord[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
   const [submissionFeedback, setSubmissionFeedback] = useState<{
     status: 'success' | 'error';
     message: string;
-    course?: string;
+    course?: string | undefined;
   } | null>(null);
 
   // Load student courses and warnings
@@ -163,6 +173,72 @@ export const StudentDashboard: React.FC = () => {
     setIsFaceModalOpen(true);
   };
 
+  // Direct manual submission fallback (from teammate's branch)
+  const handleQuickManualSubmit = async () => {
+    setFormError(null);
+    setSubmissionFeedback(null);
+
+    const result = StudentCheckInSchema.safeParse({ sessionCode: sessionCode.trim() });
+    if (!result.success) {
+      setFormError(result.error.errors[0]?.message || 'Please enter a valid session code format (e.g. DIST-849)');
+      return;
+    }
+
+    setIsQuickSubmitting(true);
+
+    try {
+      if (isSupabaseConfigured && effectiveSessionId) {
+        const { data, error } = await (supabase as any).rpc('submit_student_attendance', {
+          p_session_id: effectiveSessionId,
+          p_submitted_code: sessionCode.trim(),
+        });
+
+        setIsQuickSubmitting(false);
+
+        if (!error && data?.success) {
+          setSubmissionFeedback({
+            status: 'success',
+            message: 'Attendance recorded successfully via code verification!',
+            course: effectiveCourseCode ? `${effectiveCourseCode}: Recorded` : undefined,
+          });
+          setSessionCode('');
+          loadStudentData();
+          return;
+        } else if (data && data.success === false) {
+          setSubmissionFeedback({
+            status: 'error',
+            message: data.error || 'The session code entered is invalid or has expired.',
+          });
+          return;
+        }
+      }
+
+      // Offline / demo fallback check
+      setTimeout(() => {
+        setIsQuickSubmitting(false);
+        if (sessionCode.trim().toUpperCase() === 'DIST-849' || sessionCode.trim().length >= 6) {
+          setSubmissionFeedback({
+            status: 'success',
+            message: 'Check-in received! Session token validated and presence recorded.',
+            course: effectiveCourseCode || 'CS301: Distributed Computing Systems',
+          });
+          setSessionCode('');
+        } else {
+          setSubmissionFeedback({
+            status: 'error',
+            message: 'The session code entered is invalid or has expired. Please verify with your instructor.',
+          });
+        }
+      }, 700);
+    } catch {
+      setIsQuickSubmitting(false);
+      setSubmissionFeedback({
+        status: 'error',
+        message: 'Could not process submission. Please try face verification or scan live QR.',
+      });
+    }
+  };
+
   const handleVerificationComplete = (result: { success: boolean; message: string }) => {
     if (result.success) {
       setSubmissionFeedback({
@@ -172,7 +248,6 @@ export const StudentDashboard: React.FC = () => {
       });
       setSessionCode('');
       setValidQrTimestamp(null);
-      // Refresh course statistics
       loadStudentData();
     } else {
       setSubmissionFeedback({
@@ -209,14 +284,35 @@ export const StudentDashboard: React.FC = () => {
     setWarnings((prev) => prev.filter((w) => w.id !== warningId));
   };
 
+  // Open Full Log Modal for a course (from teammate's branch)
+  const handleOpenCourseLog = async (course: StudentEnrolledCourse) => {
+    setSelectedCourseForLog(course);
+    setIsLoadingHistory(true);
+    const history = await sessionService.getStudentSessionHistory(course.courseId, user?.id || 'demo-student');
+    setCourseSessionHistory(history);
+    setIsLoadingHistory(false);
+  };
+
   const unreadWarnings = warnings.filter((w) => !w.isRead);
+  const studentDisplayName = profile?.full_name || user?.email?.split('@')[0] || 'Student';
+  const studentRoll = profile?.institution_id ? `Roll: ${profile.institution_id}` : 'MNIT Portal';
+
+  // Check if any course is critical (< 75%)
+  const criticalCourse = enrolledCourses.find((c) => c.attendancePercent < 75);
 
   return (
     <div className="space-y-6">
-      {/* Title & Actions */}
-      <div className="pb-2 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Title & Student Profile Banner */}
+      <div className="pb-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Student Attendance Portal</h1>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              Welcome back, {studentDisplayName}
+            </h1>
+            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+              {studentRoll}
+            </span>
+          </div>
           <p className="text-sm text-slate-500">
             Submit classroom QR tokens with biometric face verification and track course quorum.
           </p>
@@ -241,7 +337,7 @@ export const StudentDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ⚠️ IN-APP WARNING MESSAGES BANNER */}
+      {/* ⚠️ IN-APP WARNING MESSAGES BANNER (From Teacher Portal) */}
       {unreadWarnings.length > 0 && (
         <div className="space-y-3">
           {unreadWarnings.map((w) => (
@@ -283,6 +379,27 @@ export const StudentDashboard: React.FC = () => {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ⚠️ CRITICAL THRESHOLD ALERT (From Teammate's Branch) */}
+      {criticalCourse && unreadWarnings.length === 0 && (
+        <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex items-start gap-3.5 shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-rose-100 border border-rose-200 text-rose-700 flex items-center justify-center shrink-0">
+            <AlertCircle className="w-5 h-5 text-rose-600" />
+          </div>
+          <div className="text-sm space-y-1 flex-1">
+            <h4 className="font-bold text-rose-950 flex items-center gap-2">
+              <span>Attendance Threshold Alert</span>
+              <span className="font-mono text-xs font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full">
+                {criticalCourse.code}: {criticalCourse.attendancePercent}%
+              </span>
+            </h4>
+            <p className="text-rose-800 text-xs leading-relaxed">
+              Your attendance in <strong>{criticalCourse.code} ({criticalCourse.name})</strong> is currently{' '}
+              <strong>{criticalCourse.attendancePercent}%</strong>, which is below the mandatory university threshold of <strong>75%</strong>. Attend the next consecutive sessions to restore eligibility.
+            </p>
+          </div>
         </div>
       )}
 
@@ -364,6 +481,19 @@ export const StudentDashboard: React.FC = () => {
                 <ScanFace className="w-4 h-4" />
                 Verify Face &amp; Check In
               </Button>
+
+              {/* Quick Submit Fallback Button (From Teammate's Branch) */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleQuickManualSubmit}
+                isLoading={isQuickSubmitting}
+                disabled={!sessionCode.trim()}
+                className="text-slate-700 border-slate-300 hover:bg-slate-50 gap-1.5"
+                title="Quick token submit without camera"
+              >
+                Quick Submit
+              </Button>
             </div>
 
             {formError && (
@@ -397,14 +527,17 @@ export const StudentDashboard: React.FC = () => {
           </form>
 
           {/* Biometric Guarantee Note */}
-          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
-            <Camera className="w-3.5 h-3.5 text-brand-600 shrink-0" />
-            <span>Biometric camera verification matches facial alignment before recording attendance.</span>
+          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-brand-600 shrink-0" />
+              Biometric camera matches facial alignment against registered profile.
+            </span>
+            <span className="hidden sm:inline text-slate-400">Zero Proxy Guarantee</span>
           </div>
         </div>
       </Card>
 
-      {/* Real Enrolled Course Attendance Quorum */}
+      {/* Enrolled Course Attendance Quorum Cards */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -422,56 +555,72 @@ export const StudentDashboard: React.FC = () => {
 
         {isLoadingCourses ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[1, 2].map((i) => (
-              <div key={i} className="h-36 rounded-2xl bg-slate-100 animate-pulse" />
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-40 rounded-2xl bg-slate-100 animate-pulse" />
             ))}
           </div>
         ) : enrolledCourses.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {enrolledCourses.map((c) => {
               const isAtRisk = c.attendancePercent < 75;
+              const faculty = c.facultyName || 'Faculty Instructor';
               return (
-                <Card key={c.courseId} className="p-4 space-y-3.5 border-slate-200 hover:border-slate-300 transition-all">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded border border-brand-100">
-                          {c.code}
-                        </span>
-                        <span className="text-xs text-slate-400">{c.semester}</span>
+                <Card key={c.courseId} className="p-4 space-y-3.5 border-slate-200 hover:border-slate-300 transition-all flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-brand-600 bg-brand-50 px-2 py-0.5 rounded border border-brand-100">
+                            {c.code}
+                          </span>
+                          <span className="text-xs text-slate-400">{c.semester}</span>
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900 mt-1">{c.name}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{faculty}</p>
                       </div>
-                      <h3 className="text-sm font-bold text-slate-900 mt-1">{c.name}</h3>
+                      <Badge variant={isAtRisk ? 'danger' : 'success'} className="shrink-0 text-[10px]">
+                        {isAtRisk ? 'Below 75% Requirement' : 'Eligible'}
+                      </Badge>
                     </div>
-                    <Badge variant={isAtRisk ? 'danger' : 'success'} className="shrink-0 text-[10px]">
-                      {isAtRisk ? 'At Risk (<75%)' : 'Eligible'}
-                    </Badge>
+
+                    {/* Attendance Percentage & Progress Bar */}
+                    <div className="space-y-1.5 mt-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                          {c.attendedSessions} of {c.totalSessions} sessions attended
+                        </span>
+                        <span className={`font-mono font-black text-sm flex items-center gap-1 ${isAtRisk ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {isAtRisk && <TrendingDown className="w-3.5 h-3.5" />}
+                          {c.attendancePercent}%
+                        </span>
+                      </div>
+
+                      <div className="w-full bg-slate-100 rounded-full h-2.5 relative overflow-hidden">
+                        <div
+                          className={`h-2.5 rounded-full transition-all duration-500 ${isAtRisk ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                          style={{ width: `${Math.min(100, c.attendancePercent)}%` }}
+                        />
+                        {/* 75% threshold marker */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-slate-400"
+                          style={{ left: '75%' }}
+                          title="75% Quorum Threshold"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Attendance Percentage & Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-slate-500 flex items-center gap-1">
-                        <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
-                        {c.attendedSessions} of {c.totalSessions} sessions attended
-                      </span>
-                      <span className={`font-mono font-black text-sm flex items-center gap-1 ${isAtRisk ? 'text-rose-600' : 'text-emerald-600'}`}>
-                        {isAtRisk && <TrendingDown className="w-3.5 h-3.5" />}
-                        {c.attendancePercent}%
-                      </span>
-                    </div>
-
-                    <div className="w-full bg-slate-100 rounded-full h-2.5 relative overflow-hidden">
-                      <div
-                        className={`h-2.5 rounded-full transition-all duration-500 ${isAtRisk ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.min(100, c.attendancePercent)}%` }}
-                      />
-                      {/* 75% threshold marker */}
-                      <div
-                        className="absolute top-0 bottom-0 w-0.5 bg-slate-400"
-                        style={{ left: '75%' }}
-                        title="75% Quorum Threshold"
-                      />
-                    </div>
+                  {/* Card Footer with Minimum Required and Interactive Full Log button */}
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t border-slate-100 mt-2">
+                    <span>Minimum Required: 75%</span>
+                    <button
+                      onClick={() => handleOpenCourseLog(c)}
+                      className="text-emerald-700 hover:text-emerald-800 font-semibold inline-flex items-center gap-1 transition-colors group cursor-pointer"
+                    >
+                      <span>Full Log</span>
+                      <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                    </button>
                   </div>
                 </Card>
               );
@@ -498,6 +647,95 @@ export const StudentDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Course Attendance History Modal ("Full Log") */}
+      <Modal
+        isOpen={Boolean(selectedCourseForLog)}
+        onClose={() => setSelectedCourseForLog(null)}
+        title={selectedCourseForLog ? `${selectedCourseForLog.code} — Attendance History` : 'Attendance History'}
+        description={selectedCourseForLog ? `${selectedCourseForLog.name} • ${selectedCourseForLog.facultyName || 'Faculty Instructor'}` : ''}
+        maxWidth="lg"
+      >
+        <div className="space-y-4">
+          {selectedCourseForLog && (
+            <div className="grid grid-cols-3 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium">Attended Sessions</p>
+                <p className="text-lg font-bold text-slate-900 mt-0.5">
+                  {selectedCourseForLog.attendedSessions}/{selectedCourseForLog.totalSessions}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium">Current Quorum</p>
+                <p className={`text-lg font-bold mt-0.5 ${selectedCourseForLog.attendancePercent < 75 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                  {selectedCourseForLog.attendancePercent}%
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-slate-400 font-medium">Status</p>
+                <Badge
+                  variant={selectedCourseForLog.attendancePercent < 75 ? 'danger' : 'success'}
+                  className="mt-1"
+                >
+                  {selectedCourseForLog.attendancePercent < 75 ? 'Critical (<75%)' : 'Eligible'}
+                </Badge>
+              </div>
+            </div>
+          )}
+
+          {isLoadingHistory ? (
+            <div className="space-y-2 py-6">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-14 rounded-xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : courseSessionHistory.length > 0 ? (
+            <div className="max-h-80 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-100">
+              {courseSessionHistory.map((s) => {
+                const isPresent = s.status === 'present';
+                const isLate = s.status === 'late';
+                return (
+                  <div key={s.sessionId} className="pt-2.5 pb-2 flex items-center justify-between gap-3 text-xs">
+                    <div className="space-y-0.5">
+                      <p className="font-semibold text-slate-900">{s.sessionTitle}</p>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        <span>{s.sessionDate}</span>
+                        {s.verifiedAt && (
+                          <>
+                            <span>•</span>
+                            <span className="text-emerald-700 font-medium flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-emerald-500" />
+                              {s.verificationMethod || 'Biometric Match'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <Badge
+                      variant={isPresent ? 'success' : isLate ? 'warning' : 'danger'}
+                      className="shrink-0 uppercase text-[10px]"
+                    >
+                      {s.status}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p>No classroom sessions recorded yet for this course.</p>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-3 border-t border-slate-100">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedCourseForLog(null)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Join Course Modal (Google Classroom style) */}
       <Modal

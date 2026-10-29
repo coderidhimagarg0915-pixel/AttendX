@@ -54,13 +54,13 @@ export const LandingPage: React.FC = () => {
         <div className="text-center max-w-3xl mx-auto space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-200">
             <Sparkles className="w-3.5 h-3.5" />
-            Milestone 2 — Centralized Supabase Auth &amp; Google Classroom-Style Enrollment
+            v1.0 — Zero-Proxy Biometric Attendance Platform
           </div>
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">
             High-integrity classroom attendance for modern higher education.
           </h1>
           <p className="text-base sm:text-lg text-slate-600 leading-relaxed">
-            AttendX eliminates proxy attendance with dynamic cryptographic session codes, server-side PostgreSQL Row-Level Security, and dual dashboards tailored for professors and students.
+            AttendX eliminates proxy attendance with dynamic rotating QR session codes, on-device biometric facial verification, and server-side PostgreSQL Row-Level Security — zero client-side trust.
           </p>
         </div>
 
@@ -85,11 +85,11 @@ export const LandingPage: React.FC = () => {
               <ul className="mt-6 space-y-2.5 text-xs text-slate-600">
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-brand-600 shrink-0" />
-                  Real-time dynamic session token generator
+                  Rotating QR codes (15s) — anti-screenshot proxy lock
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-brand-600 shrink-0" />
-                  Live attendee counter with auto-expiring windows
+                  Live attendee counter with auto-expiring session windows
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-brand-600 shrink-0" />
@@ -121,13 +121,13 @@ export const LandingPage: React.FC = () => {
               </div>
               <h2 className="text-2xl font-bold text-slate-900 mt-2">Student Dashboard</h2>
               <p className="text-slate-600 text-sm mt-3 leading-relaxed">
-                Instant classroom check-in terminal with Zod input validation, real-time subject-wise percentage tracking, and proactive threshold alerts (&lt;75% attendance).
+                QR check-in terminal with on-device biometric face verification, real-time subject-wise percentage tracking, and proactive low-attendance alerts (&lt;75%).
               </p>
 
               <ul className="mt-6 space-y-2.5 text-xs text-slate-600">
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  One-tap token entry with keyboard navigation &amp; error states
+                  Biometric facial match — zero-proxy, zero-delegation
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -135,7 +135,7 @@ export const LandingPage: React.FC = () => {
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  Cryptographic server confirmation status
+                  Cryptographic server confirmation &amp; tamper-proof timestamps
                 </li>
               </ul>
             </div>
@@ -168,7 +168,7 @@ export const LandingPage: React.FC = () => {
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
               <p className="font-semibold text-slate-800">Rule 11: True Verification</p>
               <p className="mt-1 text-slate-500">
-                Students are never marked present just because the browser reports 200 OK. Verification requires database timestamp matching.
+                Never marked present without biometric face match AND database timestamp validation. Silent-pass on error is prohibited.
               </p>
             </div>
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">

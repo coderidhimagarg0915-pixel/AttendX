@@ -11,7 +11,7 @@ import { sessionService, AttendanceSessionData, StudentAttendee, CourseStudent, 
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { AttendanceStatus } from '@/types/attendance';
 import {
-  Users, Clock, CheckCircle, Play, Square, Search, RefreshCw, QrCode, Download,
+  Users, CheckCircle, Play, Square, Search, RefreshCw, QrCode, Download,
   ShieldCheck, UserCheck, ChevronLeft, UserPlus, Copy, Check, History,
   TrendingDown, BookOpen, CalendarDays, Plus
 } from 'lucide-react';
@@ -632,7 +632,7 @@ export const ClassroomPage: React.FC = () => {
         onClose={() => setIsQrModalOpen(false)}
         session={activeSession}
         timeLeftFormatted={timeLeftFormatted}
-        onCodeRotated={(newCode) => {
+        onCodeRotated={(newCode, _ts) => {
           if (activeSession) sessionService.rotateSessionCode(activeSession.id, newCode);
           setActiveSession((prev) => prev ? { ...prev, code: newCode } : null);
         }}
