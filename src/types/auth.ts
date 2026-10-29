@@ -10,6 +10,8 @@ export interface UserProfile {
   avatar_url?: string | null | undefined;
   institution_id?: string | null | undefined;
   department?: string | null | undefined;
+  face_embedding?: number[] | null | undefined;
+  face_registered_at?: string | null | undefined;
   created_at: string;
   updated_at: string;
 }
@@ -33,6 +35,8 @@ export interface AuthContextType {
     fullName: string;
     institutionId?: string | undefined;
     role?: UserRole | undefined;
+    faceEmbedding?: number[] | undefined;
+    faceImageBlob?: Blob | undefined;
   }) => Promise<SignUpResult>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
   verifyEmailOtp: (email: string, token: string) => Promise<{ error: Error | null; role?: UserRole | undefined }>;

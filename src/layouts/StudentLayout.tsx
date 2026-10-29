@@ -64,9 +64,17 @@ export const StudentLayout: React.FC = () => {
               <p className="text-xs font-semibold text-slate-800">{displayName}</p>
               <p className="text-[11px] text-slate-500">{displayRoll}</p>
             </div>
-            <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center justify-center font-semibold text-xs">
-              {initials}
-            </div>
+            {profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt={displayName}
+                className="w-9 h-9 rounded-full object-cover border border-emerald-200 shadow-sm"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center justify-center font-semibold text-xs">
+                {initials}
+              </div>
+            )}
             <button
               onClick={handleSignOut}
               className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-lg hover:bg-slate-100"

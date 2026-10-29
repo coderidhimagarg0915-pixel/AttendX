@@ -117,13 +117,15 @@ BEGIN
     END IF;
 
     -- Read role from signup metadata safely
-    v_meta_role := lower(COALESCE(new.raw_user_meta_data->>'role', 'student'));
+    v_meta_role := lower(new.raw_user_meta_data->>'role');
     
-    IF v_meta_role IN ('student', 'faculty', 'admin') THEN
-        v_role := v_meta_role::public.user_role;
-    ELSE
-        v_role := 'student'::public.user_role;
+    -- If no role was provided in registration metadata, this is an uncompleted/unregistered user (e.g. fresh OAuth)
+    -- Do NOT auto-insert a profile for them so they cannot bypass registration.
+    IF v_meta_role IS NULL OR v_meta_role NOT IN ('student', 'faculty', 'admin') THEN
+        RETURN NEW;
     END IF;
+
+    v_role := v_meta_role::public.user_role;
 
     INSERT INTO public.profiles (
         id,

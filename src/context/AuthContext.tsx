@@ -26,6 +26,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data) {
+        // Guard against uncompleted/unregistered OAuth accounts:
+        // When a user signs in via Google OAuth without registering, Supabase DB trigger may have
+        // auto-inserted a stub with no institution_id, no face_embedding, and no user_metadata role.
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        const isGoogleUser = currentUser?.app_metadata?.provider === 'google' ||
+                             currentUser?.identities?.some((id) => id.provider === 'google');
+        const hasMetadataRole = !!currentUser?.user_metadata?.role;
+        const isRegistered = !isGoogleUser || hasMetadataRole || !!data.institution_id || !!data.face_embedding;
+
+        if (!isRegistered) {
+          console.warn('[AuthContext] Unregistered Google OAuth stub profile detected. Blocking access.');
+          setProfile(null);
+          setRole(null);
+          return null;
+        }
+
         const typedProfile: UserProfile = {
           id: data.id,
           email: data.email,
@@ -34,6 +50,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           avatar_url: data.avatar_url,
           institution_id: data.institution_id,
           department: data.department,
+          face_embedding: (data.face_embedding as unknown as number[]) || null,
+          face_registered_at: data.face_registered_at || null,
           created_at: data.created_at,
           updated_at: data.updated_at,
         };
@@ -42,47 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return typedProfile;
       }
 
-      // Self-heal: If profile row is missing from public.profiles, create it right now from auth user metadata!
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser && currentUser.id === userId) {
-        const meta = currentUser.user_metadata || {};
-        const fallbackRole = (meta.role as UserRole) || 'student';
-        const fallbackName = meta.full_name || currentUser.email?.split('@')[0] || 'User';
-
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .upsert(
-            {
-              id: userId,
-              email: currentUser.email || '',
-              full_name: fallbackName,
-              role: fallbackRole,
-              institution_id: meta.institution_id || null,
-            },
-            { onConflict: 'id' }
-          )
-          .select('*')
-          .single();
-
-        if (newProfile && !createError) {
-          const typedProfile: UserProfile = {
-            id: newProfile.id,
-            email: newProfile.email,
-            full_name: newProfile.full_name,
-            role: newProfile.role as UserRole,
-            avatar_url: newProfile.avatar_url,
-            institution_id: newProfile.institution_id,
-            department: newProfile.department,
-            created_at: newProfile.created_at,
-            updated_at: newProfile.updated_at,
-          };
-          setProfile(typedProfile);
-          setRole(typedProfile.role);
-          return typedProfile;
-        }
-      }
-
-      console.warn('[AuthContext] Could not resolve or create profile for user:', userId);
+      // If no row exists in public.profiles, user has not registered
       return null;
     } catch (err) {
       console.error('[AuthContext] Unexpected error fetching profile:', err);
@@ -105,8 +83,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isMounted) return;
 
       if (session?.user) {
-        setUser(session.user);
-        await fetchProfile(session.user.id);
+        const userProfile = await fetchProfile(session.user.id);
+        if (userProfile) {
+          setUser(session.user);
+        } else {
+          // If no profile exists, sign out to prevent ghost/unregistered sessions
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          setRole(null);
+        }
       } else {
         setUser(null);
         setProfile(null);
@@ -122,12 +108,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (session?.user) {
-          setUser(session.user);
-          const metaRole = session.user.user_metadata?.role as UserRole | undefined;
-          if (metaRole) {
-            setRole(metaRole);
+          const userProfile = await fetchProfile(session.user.id);
+          if (userProfile) {
+            setUser(session.user);
+            setRole(userProfile.role);
+          } else {
+            // User is not registered! Keep auth state cleared
+            setUser(null);
+            setProfile(null);
+            setRole(null);
           }
-          await fetchProfile(session.user.id);
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -169,8 +159,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await new Promise((r) => setTimeout(r, 400));
           resolvedProfile = await fetchProfile(data.user.id);
         }
+
+        // Block sign-in if no profile exists — the user is not properly registered
+        if (!resolvedProfile) {
+          await supabase.auth.signOut();
+          setUser(null);
+          setProfile(null);
+          setRole(null);
+          setIsLoading(false);
+          return {
+            error: new Error(
+              'No account found for this email. Please register first using the New Registration tab.'
+            ),
+          };
+        }
+
         setIsLoading(false);
-        return { error: null, role: resolvedProfile?.role || metaRole };
+        return { error: null, role: resolvedProfile.role };
       }
 
       setIsLoading(false);
@@ -209,16 +214,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fullName,
     institutionId,
     role: requestedRole = 'student',
+    faceEmbedding,
+    faceImageBlob,
   }: {
     email: string;
     password: string;
     fullName: string;
     institutionId?: string | undefined;
     role?: UserRole | undefined;
+    faceEmbedding?: number[] | undefined;
+    faceImageBlob?: Blob | undefined;
   }): Promise<SignUpResult> => {
     setIsLoading(true);
     try {
       const trimmedEmail = email.trim().toLowerCase();
+
+      // 1. Upload face snapshot BEFORE calling signUp so avatar_url is ready for the auth trigger
+      let avatarUrl: string | null = null;
+      if (faceImageBlob) {
+        try {
+          const sanitizedEmail = trimmedEmail.replace(/[^a-zA-Z0-9]/g, '_');
+          const filePath = `${sanitizedEmail}_${Date.now()}.jpg`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('face-avatars')
+            .upload(filePath, faceImageBlob, { contentType: 'image/jpeg', upsert: true });
+
+          if (!uploadError && uploadData) {
+            const { data: publicUrlData } = supabase.storage
+              .from('face-avatars')
+              .getPublicUrl(filePath);
+            avatarUrl = publicUrlData.publicUrl;
+          } else if (uploadError) {
+            console.warn(
+              '[AuthContext] Storage upload failed (' + uploadError.message + '), falling back to base64 Data URL.'
+            );
+            avatarUrl = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(faceImageBlob);
+            });
+          }
+        } catch (uploadErr) {
+          console.warn('[AuthContext] Upload exception, fallback to base64:', uploadErr);
+          avatarUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(faceImageBlob);
+          });
+        }
+      }
+
+      // 2. Call Supabase signUp with full metadata including avatar_url and face_embedding
+      // The handle_new_user database trigger inserts directly into public.profiles with avatar_url and face_embedding!
       const { data, error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password,
@@ -227,6 +274,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             full_name: fullName.trim(),
             institution_id: institutionId?.trim() || null,
             role: requestedRole,
+            avatar_url: avatarUrl,
+            face_embedding: faceEmbedding || null,
           },
         },
       });
@@ -249,30 +298,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.user) {
         setUser(data.user);
         setRole(requestedRole);
-        let userProfile = await fetchProfile(data.user.id);
-        if (!userProfile) {
-          await new Promise((r) => setTimeout(r, 400));
-          userProfile = await fetchProfile(data.user.id);
-        }
 
-        if (!userProfile) {
-          // Fallback: directly create profile in public.profiles in case DB trigger is delayed
+        // 3. Dual-guarantee: Call save_registration_biometrics RPC function
+        try {
+          await supabase.rpc('save_registration_biometrics', {
+            p_user_id: data.user.id,
+            p_avatar_url: avatarUrl || '',
+            p_face_embedding: (faceEmbedding || null) as unknown as import('@/types/database').Json,
+          });
+        } catch {
+          // If RPC is pending execution, fallback to direct update
           try {
-            await supabase.from('profiles').upsert(
-              {
-                id: data.user.id,
-                email: data.user.email || trimmedEmail,
-                full_name: fullName.trim(),
-                role: requestedRole,
+            await supabase
+              .from('profiles')
+              .update({
+                avatar_url: avatarUrl,
                 institution_id: institutionId?.trim() || null,
-              },
-              { onConflict: 'id' }
-            );
-            userProfile = await fetchProfile(data.user.id);
-          } catch (upsertErr) {
-            console.warn('[AuthContext] Manual profile creation failed:', upsertErr);
+                face_embedding: faceEmbedding || null,
+                face_registered_at: faceEmbedding ? new Date().toISOString() : null,
+              })
+              .eq('id', data.user.id);
+          } catch (updateErr) {
+            console.warn('[AuthContext] Profile direct update exception:', updateErr);
           }
         }
+
+        const userProfile = await fetchProfile(data.user.id);
         setIsLoading(false);
         return { error: null, role: userProfile?.role || requestedRole, needsEmailConfirmation: false };
       }

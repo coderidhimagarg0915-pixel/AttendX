@@ -16,6 +16,7 @@ import { GraduationCap, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
  *   • Has a role      → /teacher or /student
  */
 
+
 export const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -32,40 +33,63 @@ export const AuthCallbackPage: React.FC = () => {
 
         setMessage('Signed in! Loading your profile…');
 
-        // Fetch role from public.profiles
+        // Check email domain first
+        const userEmail = user.email?.toLowerCase() || '';
+        if (!userEmail.endsWith('@mnit.ac.in')) {
+          await supabase.auth.signOut();
+          setStatus('error');
+          setMessage('Access restricted: Only official MNIT Jaipur email addresses (@mnit.ac.in) are permitted.');
+          redirectTimer = setTimeout(() => {
+            navigate('/login', {
+              replace: true,
+              state: {
+                error: 'Access restricted: Only official MNIT Jaipur email addresses (@mnit.ac.in) are permitted.',
+              },
+            });
+          }, 2500);
+          return;
+        }
+
+        // Fetch profile from public.profiles
         try {
           const { data: profile, error } = await supabase
             .from('profiles')
-            .select('role')
+            .select('role, institution_id, face_embedding')
             .eq('id', user.id)
             .maybeSingle();
 
-          if (error || !profile) {
-            // Profile row not found — retry once (DB trigger delay or new Google user)
-            await new Promise((r) => setTimeout(r, 1000));
-            const { data: retryProfile } = await supabase
-              .from('profiles')
-              .select('role')
-              .eq('id', user.id)
-              .maybeSingle();
+          // A user is NOT registered if:
+          // 1. No profile exists in public.profiles, OR
+          // 2. The user has no assigned role in their user_metadata AND no institution_id/face_embedding completed
+          // (which happens when Supabase trigger auto-inserts a default 'student' profile on Google OAuth login)
+          const isGoogleUser = user.app_metadata?.provider === 'google' || 
+                               user.identities?.some(id => id.provider === 'google');
+          const hasExplicitRole = !!user.user_metadata?.role;
+          const isRegistered = profile && (!isGoogleUser || hasExplicitRole || !!profile.institution_id || !!profile.face_embedding);
 
-            if (!retryProfile) {
-              // Still no profile — this is a brand-new Google OAuth user.
-              // Send them to role setup to complete their profile.
-              setStatus('success');
-              setMessage('Almost there! Setting up your profile…');
-              redirectTimer = setTimeout(() =>
-                navigate('/auth/role-setup', { replace: true }), 800
-              );
-              return;
+          if (error || !isRegistered) {
+            // Unregistered user! Purge the temporary record completely so no data is stored
+            try {
+              await supabase.rpc('delete_current_unregistered_user');
+            } catch {
+              try {
+                await supabase.from('profiles').delete().eq('id', user.id);
+              } catch {
+                // Ignore if fallback delete fails
+              }
             }
 
-            const role = retryProfile.role as string;
-            setStatus('success');
-            setMessage(`Welcome to AttendX! Redirecting to your ${role === 'faculty' ? 'Faculty' : 'Student'} dashboard…`);
+            await supabase.auth.signOut();
+            setStatus('error');
+            setMessage('No registered account found for this Google email. Please register first.');
             redirectTimer = setTimeout(() => {
-              navigate(role === 'faculty' ? '/teacher' : '/student', { replace: true });
-            }, 1200);
+              navigate('/login', {
+                replace: true,
+                state: {
+                  error: `No registered account found for ${user.email}. Please register first using the New Registration tab.`,
+                },
+              });
+            }, 2000);
             return;
           }
 
@@ -77,6 +101,7 @@ export const AuthCallbackPage: React.FC = () => {
           }, 1200);
 
         } catch {
+          await supabase.auth.signOut();
           setStatus('error');
           setMessage('Something went wrong. Redirecting to sign in…');
           redirectTimer = setTimeout(() => navigate('/login', { replace: true }), 3000);

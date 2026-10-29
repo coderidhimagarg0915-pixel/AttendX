@@ -21,6 +21,8 @@ export interface Database {
           avatar_url: string | null;
           institution_id: string | null;
           department: string | null;
+          face_embedding?: Json | null;
+          face_registered_at?: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -32,6 +34,8 @@ export interface Database {
           avatar_url?: string | null;
           institution_id?: string | null;
           department?: string | null;
+          face_embedding?: Json | null;
+          face_registered_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -43,6 +47,8 @@ export interface Database {
           avatar_url?: string | null;
           institution_id?: string | null;
           department?: string | null;
+          face_embedding?: Json | null;
+          face_registered_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -168,6 +174,18 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
+      save_registration_biometrics: {
+        Args: {
+          p_user_id: string;
+          p_avatar_url: string;
+          p_face_embedding: Json | null;
+        };
+        Returns: void;
+      };
+      delete_current_unregistered_user: {
+        Args: Record<PropertyKey, never>;
+        Returns: void;
+      };
       submit_student_attendance: {
         Args: {
           p_session_id: string;
