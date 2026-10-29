@@ -1,26 +1,16 @@
 import React from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useNavigate } from 'react-router-dom';
 import { PrototypeBanner } from '@/components/ui/PrototypeBanner';
 import { useAuth } from '@/context/AuthContext';
 import { 
   BookOpen, 
-  LayoutDashboard, 
-  CheckCircle2, 
-  CalendarDays, 
   ArrowLeft,
   LogOut
 } from 'lucide-react';
 
 export const StudentLayout: React.FC = () => {
-  const location = useLocation();
   const navigate = useNavigate();
   const { profile, user, signOut } = useAuth();
-
-  const navItems = [
-    { label: 'My Attendance', href: '/student', icon: LayoutDashboard },
-    { label: 'Check-In Terminal', href: '/student/checkin', icon: CheckCircle2 },
-    { label: 'Class Schedule', href: '/student/schedule', icon: CalendarDays },
-  ];
 
   const handleSignOut = async () => {
     await signOut();
@@ -87,38 +77,11 @@ export const StudentLayout: React.FC = () => {
         </div>
       </header>
 
-      {/* Main View Area */}
+      {/* Main View Area — full width, no sidebar (single page) */}
       <div className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex flex-col md:flex-row gap-6">
-          {/* Sub Navigation Sidebar */}
-          <aside className="w-full md:w-56 shrink-0">
-            <nav className="space-y-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = location.pathname === item.href;
-                return (
-                  <Link
-                    key={item.href}
-                    to={item.href}
-                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'bg-emerald-50 text-emerald-700 font-semibold'
-                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                    }`}
-                  >
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-600' : 'text-slate-400'}`} />
-                    <span>{item.label}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-          </aside>
-
-          {/* Core Content */}
-          <main className="flex-1 min-w-0">
-            <Outlet />
-          </main>
-        </div>
+        <main className="w-full min-w-0">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
