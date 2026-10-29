@@ -43,4 +43,5 @@ export interface AuthContextType {
   resendVerificationEmail: (email: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateFaceBiometrics: (descriptor: number[], avatarUrl?: string | undefined) => Promise<{ error: Error | null }>;
 }
