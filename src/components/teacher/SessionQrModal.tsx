@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles, Wifi } from 'lucide-react';
+import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles } from 'lucide-react';
 import type { AttendanceSessionData } from '@/services/sessionService';
 import { generateSessionCode } from '@/services/sessionService';
 
@@ -15,8 +15,6 @@ interface SessionQrModalProps {
 }
 
 const ROTATION_INTERVAL_SECONDS = 15;
-const HOTSPOT_IP = '192.168.137.1';
-const ETHERNET_IP = '172.22.45.49';
 
 export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   isOpen,
@@ -26,32 +24,21 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   onCodeRotated,
 }) => {
   const [copied, setCopied] = useState(false);
-  // Use refs for mutable values accessed inside setInterval — prevents closure bugs
   const currentOtpRef = useRef<string>(session?.code || '');
   const currentTimestampRef = useRef<number>(Date.now());
   const onCodeRotatedRef = useRef(onCodeRotated);
   const sessionRef = useRef(session);
 
-  // Always keep refs in sync with latest props without triggering interval re-creation
   useEffect(() => { onCodeRotatedRef.current = onCodeRotated; }, [onCodeRotated]);
   useEffect(() => { sessionRef.current = session; }, [session]);
 
-  // Separate display state from ref (for React rendering)
   const [displayOtp, setDisplayOtp] = useState(session?.code || '');
   const [displayTimestamp, setDisplayTimestamp] = useState(Date.now());
   const [secondsUntilRotation, setSecondsUntilRotation] = useState(ROTATION_INTERVAL_SECONDS);
 
-  const defaultHost = typeof window !== 'undefined'
-    ? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? `http://${HOTSPOT_IP}:5173`
-      : window.location.origin)
-    : `http://${HOTSPOT_IP}:5173`;
+  // Always use the live deployed origin (e.g. https://attend-x-lac.vercel.app)
+  const currentHost = typeof window !== 'undefined' ? window.location.origin : '';
 
-  const [mobileHost, setMobileHost] = useState(defaultHost);
-  const [customHostInput, setCustomHostInput] = useState('');
-  const [showCustomHost, setShowCustomHost] = useState(false);
-
-  // Initialize when modal opens
   useEffect(() => {
     if (isOpen && session) {
       const code = session.code;
@@ -62,9 +49,8 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
       setDisplayTimestamp(ts);
       setSecondsUntilRotation(ROTATION_INTERVAL_SECONDS);
     }
-  }, [isOpen, session?.id]); // only react to session id change, not code (avoids loop)
+  }, [isOpen, session?.id]);
 
-  // Auto-rotation interval — uses refs so it NEVER needs to be recreated on each render
   useEffect(() => {
     if (!isOpen || !session) return;
 
@@ -89,11 +75,11 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isOpen, session?.id]); // only restart if session changes identity
+  }, [isOpen, session?.id]);
 
   if (!session) return null;
 
-  const checkinUrl = `${mobileHost}/student?sessionId=${session.id}&code=${displayOtp}&ts=${displayTimestamp}&course=${encodeURIComponent(session.courseCode)}`;
+  const checkinUrl = `${currentHost}/student?sessionId=${session.id}&code=${displayOtp}&ts=${displayTimestamp}&course=${encodeURIComponent(session.courseCode)}`;
   const progressPercent = ((ROTATION_INTERVAL_SECONDS - secondsUntilRotation) / ROTATION_INTERVAL_SECONDS) * 100;
 
   const handleCopy = () => {
@@ -132,85 +118,6 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
             <span>{session.room || 'Classroom'}</span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-2">{session.title}</h2>
-        </div>
-
-        {/* Network Target Host Selector */}
-        <div className="flex flex-col items-center gap-2 text-xs bg-slate-50 p-3 rounded-2xl border border-slate-200 w-full max-w-xl">
-          <div className="flex flex-wrap items-center justify-center gap-2 w-full">
-            <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1">
-              <Wifi className="w-3.5 h-3.5 text-brand-600" />
-              Phone Target:
-            </span>
-            <button
-              type="button"
-              onClick={() => { setMobileHost(`http://${HOTSPOT_IP}:5173`); setShowCustomHost(false); }}
-              className={`px-3 py-1 rounded-lg font-mono text-xs font-semibold transition-all ${
-                mobileHost.includes(HOTSPOT_IP)
-                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-700'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              📱 Hotspot ({HOTSPOT_IP})
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMobileHost(`http://${ETHERNET_IP}:5173`); setShowCustomHost(false); }}
-              className={`px-3 py-1 rounded-lg font-mono text-xs font-semibold transition-all ${
-                mobileHost.includes(ETHERNET_IP)
-                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-700'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              🌐 Campus LAN ({ETHERNET_IP})
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMobileHost(window.location.origin); setShowCustomHost(false); }}
-              className={`px-3 py-1 rounded-lg font-mono text-xs font-semibold transition-all ${
-                mobileHost === window.location.origin
-                  ? 'bg-brand-600 text-white shadow-sm ring-1 ring-brand-700'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              💻 Localhost
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowCustomHost(!showCustomHost)}
-              className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200"
-            >
-              ✏️ Custom
-            </button>
-          </div>
-
-          {showCustomHost && (
-            <div className="flex items-center gap-2 w-full max-w-md pt-2 border-t border-slate-200">
-              <input
-                type="text"
-                placeholder="e.g. http://192.168.1.100:5173"
-                value={customHostInput}
-                onChange={(e) => setCustomHostInput(e.target.value)}
-                className="flex-1 px-3 py-1 text-xs rounded-lg border border-slate-300 font-mono"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (customHostInput.trim()) {
-                    let h = customHostInput.trim();
-                    if (!h.startsWith('http://') && !h.startsWith('https://')) h = `http://${h}`;
-                    setMobileHost(h);
-                  }
-                }}
-              >
-                Apply
-              </Button>
-            </div>
-          )}
-
-          <p className="text-[11px] text-slate-500 text-center leading-relaxed">
-            💡 <strong>Why did mobile take time to open?</strong> Campus Wi-Fi blocks phone-to-laptop connections. Connect your phone to your <strong>PC&apos;s Mobile Hotspot ({HOTSPOT_IP})</strong>, or test directly by clicking <strong>&quot;Open Student Check-In in New Tab&quot;</strong> below!
-          </p>
         </div>
 
         {/* Live Rotating QR Code Showcase */}
@@ -294,7 +201,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
               <span>Step 1: Scan Live QR</span>
             </div>
             <p className="text-slate-500 leading-relaxed text-[11px]">
-              Both devices must be on the same Wi-Fi network (use the LAN IP button above).
+              Point your phone camera at this live projection screen to open the verification portal.
             </p>
           </div>
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-1">
@@ -303,7 +210,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
               <span>Step 2: Biometric Face Match</span>
             </div>
             <p className="text-slate-500 leading-relaxed text-[11px]">
-              Camera opens on student's phone to verify presence and record attendance.
+              Camera opens automatically on student's device to verify presence against enrolled profile.
             </p>
           </div>
         </div>

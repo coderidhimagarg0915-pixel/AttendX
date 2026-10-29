@@ -29,7 +29,7 @@ import {
   Sparkles
 } from 'lucide-react';
 
-const QR_VALIDITY_WINDOW_MS = 20 * 1000; // 20 seconds TTL (15s rotation + 5s latency grace period)
+const QR_VALIDITY_WINDOW_MS = 90 * 1000; // 90 seconds TTL (accounts for camera focus, mobile browser load & network latency)
 
 export const StudentDashboard: React.FC = () => {
   const { profile, user } = useAuth();
@@ -108,43 +108,41 @@ export const StudentDashboard: React.FC = () => {
     };
   }, []);
 
-  // Validate QR TTL on scan
+  // Validate QR TTL on scan & automatically launch face verification
   useEffect(() => {
     if (!paramCode) return;
+
+    setSessionCode(paramCode);
+    setEffectiveSessionId(paramSessionId);
+    setEffectiveCourseCode(paramCourse);
 
     if (paramTs) {
       const qrTimestamp = parseInt(paramTs, 10);
       const isTimestampValid = !isNaN(qrTimestamp) && qrTimestamp > 0;
-      const ageMs = isTimestampValid ? Date.now() - qrTimestamp : Infinity;
+      const ageMs = isTimestampValid ? Date.now() - qrTimestamp : 0;
 
-      if (!isTimestampValid || ageMs > QR_VALIDITY_WINDOW_MS) {
-        // Anti-Proxy: Expired QR detected!
-        const ageSeconds = isTimestampValid ? Math.max(1, Math.round(ageMs / 1000)) : 99;
+      if (isTimestampValid && ageMs > QR_VALIDITY_WINDOW_MS) {
+        // Flag warning banner but keep session code so user can verify
+        const ageSeconds = Math.max(1, Math.round(ageMs / 1000));
         setQrExpirationError({
           isExpired: true,
           ageSeconds,
           allowedSeconds: Math.round(QR_VALIDITY_WINDOW_MS / 1000),
           code: paramCode,
         });
-        setSessionCode('');
-        setIsFaceModalOpen(false);
+        setValidQrTimestamp(null);
+        // Automatically open face modal so student proceeds to biometric scan
+        setIsFaceModalOpen(true);
         return;
       }
 
-      // Valid and fresh QR scanned within the 20-second rotation window
       setValidQrTimestamp(qrTimestamp);
-      setSessionCode(paramCode);
-      setEffectiveSessionId(paramSessionId);
-      setEffectiveCourseCode(paramCourse);
       setQrExpirationError(null);
       setIsFaceModalOpen(true);
     } else {
-      // Manual entry or link without timestamp
-      setSessionCode(paramCode);
-      setEffectiveSessionId(paramSessionId);
-      setEffectiveCourseCode(paramCourse);
       setValidQrTimestamp(null);
       setQrExpirationError(null);
+      setIsFaceModalOpen(true);
     }
   }, [paramCode, paramTs, paramSessionId, paramCourse]);
 

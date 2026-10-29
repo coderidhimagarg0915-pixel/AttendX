@@ -181,8 +181,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
                 consecutiveMatches += 1;
                 setFeedbackText(`Face Matched (${similarity}% Match • Distance: ${dist.toFixed(2)}) - Hold still...`);
 
-                // Require 3 consecutive frames with distance < 0.42 (~1.1s) for zero-proxy guarantee
-                if (consecutiveMatches >= 3) {
+                // Require 2 consecutive frames with distance < 0.52 (~1.1s) for zero-proxy guarantee
+                if (consecutiveMatches >= 2) {
                   clearInterval(detectionTimer);
                   captureFrame(activeStream);
                   setScanStep('verified');
