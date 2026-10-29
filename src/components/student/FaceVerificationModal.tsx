@@ -1,3 +1,4 @@
+import { sessionService } from '@/services/sessionService';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -76,6 +77,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   }, [profile?.avatar_url, studentId]);
 
   // Memoized stored face embedding from profile or localStorage (strictly 128 dimensions)
+  const storedEmbeddingRef = useRef<number[] | null>(null);
+
   const storedEmbedding = useMemo(() => {
     if (locallyEnrolledEmbedding && Array.isArray(locallyEnrolledEmbedding) && locallyEnrolledEmbedding.length === 128) {
       return locallyEnrolledEmbedding;
@@ -94,6 +97,10 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     }
     return null;
   }, [locallyEnrolledEmbedding, profile?.id, profile?.face_embedding, studentId]);
+
+  useEffect(() => {
+    storedEmbeddingRef.current = storedEmbedding;
+  }, [storedEmbedding]);
 
   // Initialize camera and biometric comparison loop
   useEffect(() => {
@@ -164,7 +171,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           try {
             const res = await detectSingleFaceDescriptor(videoRef.current);
 
-            if (!storedEmbedding) {
+            const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
+            if (!activeTemplate) {
               setScanStep('no_enrolled_face');
               setFeedbackText(res.message || 'Face detected. Click "Enroll Face to Profile" below.');
               return;
@@ -172,7 +180,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
 
             if (res.detected && res.descriptor && res.descriptor.length === 128) {
               setScanStep('analyzing');
-              const dist = calculateFaceMatchDistance(res.descriptor, storedEmbedding);
+              const dist = calculateFaceMatchDistance(res.descriptor, activeTemplate);
               const similarity = computeMatchSimilarity(dist, STRICT_MATCH_THRESHOLD);
               setMatchDistance(dist);
               setMatchSimilarity(similarity);
@@ -270,10 +278,11 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
 
       // Persist biometrics in Supabase and localStorage
       await updateFaceBiometrics(res.descriptor, photoDataUrl);
+      storedEmbeddingRef.current = res.descriptor;
       setLocallyEnrolledEmbedding(res.descriptor);
-      setCapturedSnapshot(null);
-      setScanStep('aligning');
-      setFeedbackText('Biometric template enrolled to profile! Now verifying your live face against the template...');
+      setCapturedSnapshot(photoDataUrl);
+      setScanStep('verified');
+      setFeedbackText('Biometric face template registered! Click "Confirm & Record Attendance" below.');
     } catch (err: any) {
       setFeedbackText(err?.message || 'Could not enroll face. Please try again.');
     } finally {
@@ -360,11 +369,39 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     }
 
     try {
-      if (isSupabaseConfigured && sessionId) {
-        const { data, error } = await (supabase as any).rpc('submit_student_attendance', {
-          p_session_id: sessionId,
-          p_submitted_code: sessionCode,
+      let targetSessionId = sessionId;
+      if (isSupabaseConfigured && !targetSessionId) {
+        const active = await sessionService.findActiveSession();
+        if (active) targetSessionId = active.id;
+      }
+
+      if (isSupabaseConfigured && targetSessionId) {
+        let { data, error } = await (supabase as any).rpc('submit_student_attendance', {
+          p_session_id: targetSessionId,
+          p_submitted_code: sessionCode.trim().toUpperCase(),
         });
+
+        // If student is not yet enrolled in the course, auto-enroll and retry
+        if (data && data.success === false && String(data.error || '').toLowerCase().includes('not enrolled')) {
+          try {
+            const { data: sessRow } = await (supabase as any)
+              .from('attendance_sessions')
+              .select('course_id')
+              .eq('id', targetSessionId)
+              .single();
+            if (sessRow?.course_id && user?.id) {
+              await (supabase as any)
+                .from('enrollments')
+                .insert({ course_id: sessRow.course_id, student_id: user.id });
+              const retryRes = await (supabase as any).rpc('submit_student_attendance', {
+                p_session_id: targetSessionId,
+                p_submitted_code: sessionCode.trim().toUpperCase(),
+              });
+              data = retryRes.data;
+              error = retryRes.error;
+            }
+          } catch {}
+        }
 
         if (!error && data?.success) {
           setIsSubmitting(false);

@@ -14,7 +14,7 @@ interface SessionQrModalProps {
   onCodeRotated?: (newCode: string, timestamp: number) => void;
 }
 
-const ROTATION_INTERVAL_SECONDS = 15;
+const ROTATION_INTERVAL_SECONDS = 30;
 
 export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   isOpen,
@@ -41,7 +41,11 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
 
   useEffect(() => {
     if (isOpen && session) {
-      const code = session.code;
+      let code = session.code;
+      if (!code) {
+        code = generateSessionCode(session.courseCode);
+        onCodeRotatedRef.current?.(code, Date.now());
+      }
       const ts = Date.now();
       currentOtpRef.current = code;
       currentTimestampRef.current = ts;
@@ -49,7 +53,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
       setDisplayTimestamp(ts);
       setSecondsUntilRotation(ROTATION_INTERVAL_SECONDS);
     }
-  }, [isOpen, session?.id]);
+  }, [isOpen, session?.id, session?.code]);
 
   useEffect(() => {
     if (!isOpen || !session) return;

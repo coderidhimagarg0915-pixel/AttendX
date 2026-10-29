@@ -5,10 +5,10 @@ let loadPromise: Promise<void> | null = null;
 
 /**
  * Strict distance threshold for 128-d L2-normalized FaceRecognitionNet embeddings.
- * Euclidean distance < 0.52 provides balanced high-confidence zero-proxy verification.
+ * Euclidean distance < 0.55 provides balanced high-confidence zero-proxy verification.
  * Different persons typically produce distance >= 0.50 (average 0.60 - 0.85).
  */
-export const STRICT_MATCH_THRESHOLD = 0.52;
+export const STRICT_MATCH_THRESHOLD = 0.55;
 
 /**
  * Loads face detection, high-resolution landmarks, and recognition models from /models
