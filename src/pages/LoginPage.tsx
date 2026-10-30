@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
@@ -17,6 +17,7 @@ import {
   IdCard,
   Camera,
   Check,
+  Sparkles,
 } from 'lucide-react';
 import { FaceScannerModal } from '@/components/auth/FaceScannerModal';
 
@@ -51,8 +52,66 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Display errors or messages passed via router state or search params
-  React.useEffect(() => {
+  // Helper to extract pending check-in or return URL
+  const getRedirectTarget = useCallback((): string | null => {
+    // 1. Check React Router state
+    const fromState = (location.state as any)?.from;
+    if (typeof fromState === 'string' && fromState.startsWith('/')) {
+      return fromState;
+    }
+    if (fromState?.pathname) {
+      return `${fromState.pathname}${fromState.search || ''}`;
+    }
+
+    // 2. Check current URL query params (if user opened /login?code=DIST-849...)
+    if (typeof window !== 'undefined' && location.search) {
+      const sp = new URLSearchParams(location.search);
+      if (sp.get('code') || sp.get('sessionId')) {
+        return `/student${location.search}`;
+      }
+    }
+
+    // 3. Check persistent localStorage check-in (valid for 10 minutes)
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('attendx_pending_checkin');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.code && Date.now() - (parsed.storedAt || 0) < 600000) {
+            const qs = new URLSearchParams();
+            if (parsed.sessionId) qs.set('sessionId', parsed.sessionId);
+            if (parsed.code) qs.set('code', parsed.code);
+            if (parsed.ts) qs.set('ts', parsed.ts);
+            if (parsed.course) qs.set('course', parsed.course);
+            return `/student?${qs.toString()}`;
+          }
+        }
+      } catch {}
+    }
+
+    return null;
+  }, [location.state, location.search]);
+
+  // Detected pending checkin info for UI banner
+  const pendingCheckinInfo = useMemo(() => {
+    const target = getRedirectTarget();
+    if (target && target.includes('code=')) {
+      try {
+        const queryPart = target.split('?')[1];
+        if (queryPart) {
+          const sp = new URLSearchParams(queryPart);
+          return {
+            code: sp.get('code'),
+            course: sp.get('course'),
+          };
+        }
+      } catch {}
+    }
+    return null;
+  }, [getRedirectTarget]);
+
+  // Display errors or messages passed via router state
+  useEffect(() => {
     const state = location.state as { error?: string; message?: string } | null;
     if (state?.error) {
       setErrorMessage(state.error);
@@ -61,21 +120,19 @@ export const LoginPage: React.FC = () => {
     }
   }, [location.state]);
 
-  // Get original redirect target if user was bounced from a protected route
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
-
-  // Automatically redirect when email link confirmation logs user in
-  React.useEffect(() => {
+  // Automatically redirect when user is authenticated
+  useEffect(() => {
     if (user && role) {
-      if (from) {
-        navigate(from, { replace: true });
-      } else if (role === 'faculty') {
+      const target = getRedirectTarget();
+      if (role === 'faculty') {
         navigate('/teacher', { replace: true });
+      } else if (target) {
+        navigate(target, { replace: true });
       } else {
         navigate('/student', { replace: true });
       }
     }
-  }, [user, role, navigate, from]);
+  }, [user, role, navigate, getRedirectTarget]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,10 +168,11 @@ export const LoginPage: React.FC = () => {
     }
 
     const effectiveRole = loggedInRole || role || 'student';
-    if (from) {
-      navigate(from, { replace: true });
-    } else if (effectiveRole === 'faculty' || effectiveRole === 'admin') {
+    const target = getRedirectTarget();
+    if (effectiveRole === 'faculty' || effectiveRole === 'admin') {
       navigate('/teacher', { replace: true });
+    } else if (target) {
+      navigate(target, { replace: true });
     } else {
       navigate('/student', { replace: true });
     }
@@ -124,14 +182,19 @@ export const LoginPage: React.FC = () => {
     setErrorMessage(null);
     setSuccessMessage(null);
     setIsGoogleLoading(true);
-    // signInWithGoogle triggers a redirect to Google — the page will navigate away.
-    // If there's an error (e.g. provider not enabled), show it.
+
+    const target = getRedirectTarget();
+    if (target && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('attendx_oauth_return', target);
+      } catch {}
+    }
+
     const { error } = await signInWithGoogle();
     if (error) {
       setErrorMessage(error.message || 'Google sign-in failed. Please try again.');
       setIsGoogleLoading(false);
     }
-    // On success, browser redirects to Google — no further action needed here.
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -190,10 +253,13 @@ export const LoginPage: React.FC = () => {
     }
 
     const effectiveRole = createdRole || assignedRole;
+    const target = getRedirectTarget();
     setSuccessMessage('Account created successfully! Redirecting to your dashboard...');
     setTimeout(() => {
       if (effectiveRole === 'faculty') {
         navigate('/teacher', { replace: true });
+      } else if (target) {
+        navigate(target, { replace: true });
       } else {
         navigate('/student', { replace: true });
       }
@@ -234,10 +300,11 @@ export const LoginPage: React.FC = () => {
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
-              className={`flex-1 py-3 text-xs font-semibold text-center border-b-2 transition-all ${activeTab === 'signin'
-                ? 'border-brand-600 text-brand-700 bg-brand-50/40'
-                : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                }`}
+              className={`flex-1 py-3 text-xs font-semibold text-center border-b-2 transition-all ${
+                activeTab === 'signin'
+                  ? 'border-brand-600 text-brand-700 bg-brand-50/40'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+              }`}
             >
               Sign In (All Roles)
             </button>
@@ -248,14 +315,36 @@ export const LoginPage: React.FC = () => {
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
-              className={`flex-1 py-3 text-xs font-semibold text-center border-b-2 transition-all ${activeTab === 'signup'
-                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/40'
-                : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                }`}
+              className={`flex-1 py-3 text-xs font-semibold text-center border-b-2 transition-all ${
+                activeTab === 'signup'
+                  ? 'border-emerald-600 text-emerald-700 bg-emerald-50/40'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+              }`}
             >
               New Registration
             </button>
           </div>
+
+          {/* Pending Check-in Notification Banner */}
+          {pendingCheckinInfo?.code && (
+            <div className="mb-4 p-3.5 rounded-xl bg-gradient-to-r from-brand-50 to-emerald-50 border border-brand-200 text-slate-800 text-xs flex items-center justify-between gap-3 shadow-sm animate-in fade-in">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-brand-600 text-white flex items-center justify-center shrink-0">
+                  <Sparkles className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900">QR Check-In Detected!</p>
+                  <p className="text-[11px] text-slate-600">
+                    Code <strong className="font-mono text-brand-700 bg-brand-100/80 px-1.5 py-0.5 rounded font-bold">{pendingCheckinInfo.code}</strong>{' '}
+                    {pendingCheckinInfo.course ? `(${pendingCheckinInfo.course})` : ''} will open verification automatically after sign in.
+                  </p>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md shrink-0 border border-emerald-200">
+                Auto-Saved
+              </span>
+            </div>
+          )}
 
           {/* Error Banner */}
           {errorMessage && (
@@ -274,7 +363,7 @@ export const LoginPage: React.FC = () => {
           )}
 
           {activeTab === 'signin' ? (
-            /* 2. SIGN IN FORM */
+            /* SIGN IN FORM */
             <form onSubmit={handleSignIn} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -373,7 +462,7 @@ export const LoginPage: React.FC = () => {
               </div>
             </form>
           ) : (
-            /* 3. SIGN UP FORM (Google Classroom Self-Service) */
+            /* SIGN UP FORM */
             <form onSubmit={handleSignUp} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">

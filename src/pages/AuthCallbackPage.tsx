@@ -13,9 +13,8 @@ import { GraduationCap, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
  * The Supabase client SDK automatically exchanges these for a session.
  * We wait for the SIGNED_IN event, fetch the profile, and route the user:
  *   • No profile yet  → /auth/role-setup   (new Google OAuth user)
- *   • Has a role      → /teacher or /student
+ *   • Has a role      → /teacher or /student (or pending check-in if present)
  */
-
 
 export const AuthCallbackPage: React.FC = () => {
   const navigate = useNavigate();
@@ -61,7 +60,6 @@ export const AuthCallbackPage: React.FC = () => {
           // A user is NOT registered if:
           // 1. No profile exists in public.profiles, OR
           // 2. The user has no assigned role in their user_metadata AND no institution_id/face_embedding completed
-          // (which happens when Supabase trigger auto-inserts a default 'student' profile on Google OAuth login)
           const isGoogleUser = user.app_metadata?.provider === 'google' || 
                                user.identities?.some(id => id.provider === 'google');
           const hasExplicitRole = !!user.user_metadata?.role;
@@ -96,8 +94,34 @@ export const AuthCallbackPage: React.FC = () => {
           const role = profile.role as string;
           setStatus('success');
           setMessage(`Welcome back! Redirecting to your ${role === 'faculty' ? 'Faculty' : 'Student'} dashboard…`);
+
+          // Check if there is a pending checkin for student
+          let target = role === 'faculty' ? '/teacher' : '/student';
+          if (role !== 'faculty' && typeof window !== 'undefined') {
+            try {
+              const oauthReturn = sessionStorage.getItem('attendx_oauth_return');
+              if (oauthReturn) {
+                target = oauthReturn;
+                sessionStorage.removeItem('attendx_oauth_return');
+              } else {
+                const pending = localStorage.getItem('attendx_pending_checkin');
+                if (pending) {
+                  const parsed = JSON.parse(pending);
+                  if (parsed?.code && Date.now() - (parsed.storedAt || 0) < 600000) {
+                    const qs = new URLSearchParams();
+                    if (parsed.sessionId) qs.set('sessionId', parsed.sessionId);
+                    if (parsed.code) qs.set('code', parsed.code);
+                    if (parsed.ts) qs.set('ts', parsed.ts);
+                    if (parsed.course) qs.set('course', parsed.course);
+                    target = `/student?${qs.toString()}`;
+                  }
+                }
+              }
+            } catch {}
+          }
+
           redirectTimer = setTimeout(() => {
-            navigate(role === 'faculty' ? '/teacher' : '/student', { replace: true });
+            navigate(target, { replace: true });
           }, 1200);
 
         } catch {

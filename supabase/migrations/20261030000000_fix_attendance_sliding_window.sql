@@ -175,3 +175,4 @@ $$;
 
 REVOKE ALL ON FUNCTION public.submit_student_attendance(UUID, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.submit_student_attendance(UUID, TEXT) TO authenticated;
+

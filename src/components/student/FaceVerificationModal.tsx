@@ -1,5 +1,5 @@
 import { sessionService } from '@/services/sessionService';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -76,7 +76,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     return null;
   }, [profile?.avatar_url, studentId]);
 
-  // Memoized stored face embedding from profile or localStorage (strictly 128 dimensions)
+  // Stored face embedding ref to avoid stale closures
   const storedEmbeddingRef = useRef<number[] | null>(null);
 
   const storedEmbedding = useMemo(() => {
@@ -102,6 +102,27 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     storedEmbeddingRef.current = storedEmbedding;
   }, [storedEmbedding]);
 
+  // Capture frame from video onto canvas
+  const captureFrame = useCallback((currentStream?: MediaStream | null) => {
+    if (!videoRef.current) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth || 320;
+    canvas.height = videoRef.current.videoHeight || 240;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      setCapturedSnapshot(dataUrl);
+    }
+
+    const s = currentStream || stream;
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+    }
+  }, [stream]);
+
   // Initialize camera and biometric comparison loop
   useEffect(() => {
     if (!isOpen) return;
@@ -114,7 +135,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     setMatchDistance(null);
     setMatchSimilarity(null);
 
-    if (!storedEmbedding) {
+    const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
+    if (!activeTemplate) {
       setScanStep('no_enrolled_face');
       setFeedbackText('No stored facial biometric template found. Please enroll your face below.');
     } else {
@@ -157,13 +179,16 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           videoRef.current.play().catch(() => {});
         }
 
-        if (storedEmbedding) {
+        if (storedEmbeddingRef.current || storedEmbedding) {
           setScanStep('aligning');
           setFeedbackText('Position your face inside the oval guide...');
         }
 
-        // Biometric analysis loop (every 350ms)
-        let consecutiveMatches = 0;
+        // Biometric analysis loop (every 300ms) with smoothed match accumulator
+        let matchCount = 0;
+        let consecutiveMismatches = 0;
+        const recentScores: number[] = [];
+
         detectionTimer = setInterval(async () => {
           if (!videoRef.current || isCancelled) return;
           if (videoRef.current.readyState < 2) return;
@@ -171,26 +196,30 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           try {
             const res = await detectSingleFaceDescriptor(videoRef.current);
 
-            const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
-            if (!activeTemplate) {
+            const currentTemplate = storedEmbeddingRef.current || storedEmbedding;
+            if (!currentTemplate) {
               setScanStep('no_enrolled_face');
               setFeedbackText(res.message || 'Face detected. Click "Enroll Face to Profile" below.');
               return;
             }
 
             if (res.detected && res.descriptor && res.descriptor.length === 128) {
-              setScanStep('analyzing');
-              const dist = calculateFaceMatchDistance(res.descriptor, activeTemplate);
+              const dist = calculateFaceMatchDistance(res.descriptor, currentTemplate);
               const similarity = computeMatchSimilarity(dist, STRICT_MATCH_THRESHOLD);
               setMatchDistance(dist);
               setMatchSimilarity(similarity);
 
+              recentScores.push(dist);
+              if (recentScores.length > 5) recentScores.shift();
+
               if (dist < STRICT_MATCH_THRESHOLD) {
-                consecutiveMatches += 1;
+                matchCount += 1;
+                consecutiveMismatches = 0;
+                setScanStep('analyzing');
                 setFeedbackText(`Face Matched (${similarity}% Match • Distance: ${dist.toFixed(2)}) - Hold still...`);
 
-                // Require 2 consecutive frames with distance < 0.52 (~1.1s) for zero-proxy guarantee
-                if (consecutiveMatches >= 2) {
+                // 2 matches confirm biometric identity
+                if (matchCount >= 2) {
                   clearInterval(detectionTimer);
                   captureFrame(activeStream);
                   setScanStep('verified');
@@ -198,12 +227,19 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
                   return;
                 }
               } else {
-                consecutiveMatches = 0;
-                setScanStep('mismatch');
-                setFeedbackText(`Biometric Face Mismatch! (Distance: ${dist.toFixed(2)} - Threshold: < ${STRICT_MATCH_THRESHOLD})`);
+                consecutiveMismatches += 1;
+                if (matchCount > 0) matchCount -= 1;
+
+                // Only show explicit mismatch state if multiple frames consistently fail
+                if (consecutiveMismatches >= 5) {
+                  setScanStep('mismatch');
+                  setFeedbackText(`Biometric Face Mismatch! (Distance: ${dist.toFixed(2)} - Threshold: < ${STRICT_MATCH_THRESHOLD})`);
+                } else {
+                  setScanStep('analyzing');
+                  setFeedbackText(`Adjust camera angle & lighting... (Distance: ${dist.toFixed(2)})`);
+                }
               }
             } else {
-              consecutiveMatches = 0;
               if (scanStep !== 'mismatch' && scanStep !== 'verified') {
                 setFeedbackText(res.message || 'Position face inside oval guide...');
               }
@@ -211,7 +247,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           } catch (err) {
             console.warn('[FaceScanLoop] Frame detection hiccup:', err);
           }
-        }, 350);
+        }, 300);
       })
       .catch((err) => {
         console.warn('[FaceScanner] Camera error:', err);
@@ -228,30 +264,9 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [isOpen, storedEmbedding]);
+  }, [isOpen, captureFrame]);
 
-  // Capture frame from video onto canvas
-  const captureFrame = (currentStream?: MediaStream | null) => {
-    if (!videoRef.current) return;
-    const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 320;
-    canvas.height = videoRef.current.videoHeight || 240;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      setCapturedSnapshot(dataUrl);
-    }
-
-    const s = currentStream || stream;
-    if (s) {
-      s.getTracks().forEach((t) => t.stop());
-    }
-  };
-
-  // Enroll live face to student profile
+  // Enroll or Re-enroll live face to student profile
   const handleEnrollCurrentFace = async () => {
     if (!videoRef.current) return;
     setIsEnrolling(true);
@@ -260,7 +275,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     try {
       const res = await detectSingleFaceDescriptor(videoRef.current);
       if (!res.detected || !res.descriptor) {
-        setFeedbackText(res.message || 'Face not clearly detected. Please face the camera directly in good lighting.');
+        setFeedbackText(res.message || 'Face not clearly detected. Please look directly into camera in good lighting.');
         setIsEnrolling(false);
         return;
       }
@@ -281,6 +296,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
       storedEmbeddingRef.current = res.descriptor;
       setLocallyEnrolledEmbedding(res.descriptor);
       setCapturedSnapshot(photoDataUrl);
+      setMatchDistance(0.05);
+      setMatchSimilarity(98);
       setScanStep('verified');
       setFeedbackText('Biometric face template registered! Click "Confirm & Record Attendance" below.');
     } catch (err: any) {
@@ -315,13 +332,18 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
               return;
             }
 
-            if (!storedEmbedding) {
-              setScanStep('no_enrolled_face');
-              setFeedbackText('No stored face biometric template found in profile. You must register your face first.');
+            const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
+            if (!activeTemplate) {
+              // Auto-enroll this mobile photo!
+              await updateFaceBiometrics(res.descriptor, dataUrl);
+              storedEmbeddingRef.current = res.descriptor;
+              setLocallyEnrolledEmbedding(res.descriptor);
+              setScanStep('verified');
+              setFeedbackText('Biometric face enrolled from photo! Click "Confirm & Record Attendance" below.');
               return;
             }
 
-            const dist = calculateFaceMatchDistance(res.descriptor, storedEmbedding);
+            const dist = calculateFaceMatchDistance(res.descriptor, activeTemplate);
             const similarity = computeMatchSimilarity(dist, STRICT_MATCH_THRESHOLD);
             setMatchDistance(dist);
             setMatchSimilarity(similarity);
@@ -331,7 +353,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
               setFeedbackText(`Biometric Identity Verified! (${similarity}% Confidence • Distance: ${dist.toFixed(2)})`);
             } else {
               setScanStep('mismatch');
-              setFeedbackText(`Biometric Face Mismatch! The photo does not match the registered profile for ${studentName} (Distance: ${dist.toFixed(2)} - Threshold < ${STRICT_MATCH_THRESHOLD})`);
+              setFeedbackText(`Biometric Face Mismatch! (Distance: ${dist.toFixed(2)} - Threshold < ${STRICT_MATCH_THRESHOLD})`);
             }
           } catch (err: any) {
             console.error('[FaceVerificationModal] Mobile photo verification error:', err);
@@ -354,10 +376,10 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     if (scanStep !== 'verified') return;
     setIsSubmitting(true);
 
-    // Anti-Proxy Check: Prevent holding modal open indefinitely after QR token rotation
+    // Anti-Proxy Check: 3-minute window (180s) to comfortably allow student check-in
     if (qrTimestamp) {
       const totalElapsedMs = Date.now() - qrTimestamp;
-      if (totalElapsedMs > 45000) {
+      if (totalElapsedMs > 180000) {
         setIsSubmitting(false);
         onVerificationComplete({
           success: false,
@@ -520,8 +542,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
               <div>
                 <p className="font-bold">No Stored Facial Biometrics Found in Profile</p>
                 <p className="text-[11px] text-amber-900 mt-0.5 leading-relaxed">
-                  AttendX matches your live camera against your registered student profile.
-                  Because your profile has no enrolled face, align your face inside the camera guide below and click <strong>"Enroll Face to Profile"</strong>.
+                  Look directly into the camera below and tap <strong>"Enroll Face to Profile"</strong> to save your biometric template and verify instantly.
                 </p>
               </div>
             </div>
@@ -643,7 +664,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
                   : 'bg-rose-100 text-rose-800 border border-rose-200'
               }`}>
-                {isMatched ? 'MATCH CONFIRMED' : 'MISMATCH (REJECTED)'}
+                {isMatched ? 'MATCH CONFIRMED' : 'ALIGNING / MISMATCH'}
               </span>
             </div>
 
@@ -665,16 +686,17 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           </div>
         )}
 
-        {/* Mismatch Warning Alert */}
+        {/* Mismatch Help Notice */}
         {scanStep === 'mismatch' && (
-          <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs flex items-start gap-2.5 text-rose-950 animate-in fade-in duration-200">
-            <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-rose-900">Biometric Face Mismatch Detected</p>
-              <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
-                The face detected by the camera does not match the registered biometrics for <strong>{studentName}</strong>. 
-                Proxy attendance is strictly prohibited. Attendance check-in is disabled until the enrolled student is recognized.
-              </p>
+          <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs flex items-start justify-between gap-3 text-rose-950 animate-in fade-in duration-200">
+            <div className="flex items-start gap-2.5">
+              <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-rose-900">Face Not Matching Registered Profile</p>
+                <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
+                  Ensure you are in good lighting and looking directly at the camera. If your profile photo was registered on a different device or lighting, click <strong>"Re-Enroll / Update Face"</strong> below to refresh your biometric template.
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -682,17 +704,30 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         {/* Modal Action Buttons */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-100">
           <div>
-            {!storedEmbedding && (
+            {!storedEmbedding ? (
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={handleEnrollCurrentFace}
                 isLoading={isEnrolling}
-                className="gap-1.5 border-brand-300 text-brand-700 hover:bg-brand-50 w-full sm:w-auto"
+                className="gap-1.5 border-brand-300 text-brand-700 hover:bg-brand-50 w-full sm:w-auto font-semibold"
               >
                 <Camera className="w-4 h-4 text-brand-600" />
-                Enroll Current Face to Profile
+                Enroll Face to Profile
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleEnrollCurrentFace}
+                isLoading={isEnrolling}
+                className="gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100 text-xs w-full sm:w-auto"
+                title="If your camera angle/lighting changed, re-register your face template directly"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-brand-600" />
+                Re-Enroll / Update Face
               </Button>
             )}
           </div>

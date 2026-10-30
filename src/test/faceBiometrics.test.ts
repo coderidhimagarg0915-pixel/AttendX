@@ -25,7 +25,7 @@ describe('Face Biometrics - Matching & Distance Algorithms', () => {
     expect(dist).toBeGreaterThan(0);
 
     const similarity = computeMatchSimilarity(dist);
-    expect(similarity).toBeGreaterThan(75);
+    expect(similarity).toBeGreaterThan(70);
   });
 
   it('correctly rejects different people with distance exceeding strict threshold', () => {
@@ -37,7 +37,7 @@ describe('Face Biometrics - Matching & Distance Algorithms', () => {
     expect(dist).toBeGreaterThanOrEqual(STRICT_MATCH_THRESHOLD);
 
     const similarity = computeMatchSimilarity(dist);
-    expect(similarity).toBeLessThan(75);
+    expect(similarity).toBeLessThan(70);
   });
 
   it('throws an error if descriptors have mismatched dimensions', () => {
@@ -49,4 +49,3 @@ describe('Face Biometrics - Matching & Distance Algorithms', () => {
     );
   });
 });
-

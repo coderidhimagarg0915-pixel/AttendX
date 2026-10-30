@@ -27,9 +27,31 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles, ch
     );
   }
 
-  // Not authenticated: bounce to login with return path saved
+  // Not authenticated: save pending check-in parameters and bounce to login
   if (!user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    if (typeof window !== 'undefined' && location.search) {
+      try {
+        const params = new URLSearchParams(location.search);
+        const code = params.get('code');
+        const sessionId = params.get('sessionId');
+        const ts = params.get('ts');
+        const course = params.get('course');
+        if (code || sessionId) {
+          localStorage.setItem(
+            'attendx_pending_checkin',
+            JSON.stringify({
+              code,
+              sessionId,
+              ts,
+              course,
+              storedAt: Date.now(),
+            })
+          );
+        }
+      } catch {}
+    }
+    const fullPath = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to="/login" state={{ from: fullPath }} replace />;
   }
 
   // If user is authenticated but profile/role is still resolving, show clean loading state

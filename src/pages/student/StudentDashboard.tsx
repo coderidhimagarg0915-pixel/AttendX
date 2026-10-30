@@ -110,14 +110,51 @@ export const StudentDashboard: React.FC = () => {
 
   // Validate QR TTL on scan & automatically launch face verification
   useEffect(() => {
-    if (!paramCode) return;
+    let activeCode = paramCode;
+    let activeSessionId = paramSessionId;
+    let activeCourse = paramCourse;
+    let activeTs = paramTs;
 
-    setSessionCode(paramCode);
-    setEffectiveSessionId(paramSessionId);
-    setEffectiveCourseCode(paramCourse);
+    // Check localStorage fallback if URL parameters were stripped during login redirect
+    if (!activeCode && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('attendx_pending_checkin');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.code && Date.now() - (parsed.storedAt || 0) < 600000) {
+            activeCode = parsed.code;
+            activeSessionId = parsed.sessionId || '';
+            activeCourse = parsed.course || '';
+            activeTs = parsed.ts || '';
+          }
+        }
+      } catch {}
+    }
 
-    if (paramTs) {
-      const qrTimestamp = parseInt(paramTs, 10);
+    if (!activeCode) return;
+
+    setSessionCode(activeCode);
+    setEffectiveSessionId(activeSessionId);
+    setEffectiveCourseCode(activeCourse);
+
+    // Persist in localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(
+          'attendx_pending_checkin',
+          JSON.stringify({
+            code: activeCode,
+            sessionId: activeSessionId,
+            course: activeCourse,
+            ts: activeTs,
+            storedAt: Date.now(),
+          })
+        );
+      } catch {}
+    }
+
+    if (activeTs) {
+      const qrTimestamp = parseInt(activeTs, 10);
       const isTimestampValid = !isNaN(qrTimestamp) && qrTimestamp > 0;
       const ageMs = isTimestampValid ? Date.now() - qrTimestamp : 0;
 
@@ -128,7 +165,7 @@ export const StudentDashboard: React.FC = () => {
           isExpired: true,
           ageSeconds,
           allowedSeconds: Math.round(QR_VALIDITY_WINDOW_MS / 1000),
-          code: paramCode,
+          code: activeCode,
         });
         setValidQrTimestamp(null);
         // Automatically open face modal so student proceeds to biometric scan
@@ -239,6 +276,7 @@ export const StudentDashboard: React.FC = () => {
 
   const handleVerificationComplete = (result: { success: boolean; message: string }) => {
     if (result.success) {
+      if (typeof window !== 'undefined') { try { localStorage.removeItem('attendx_pending_checkin'); } catch {} }
       setSubmissionFeedback({
         status: 'success',
         message: result.message,
