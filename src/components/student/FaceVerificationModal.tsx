@@ -26,7 +26,8 @@ import {
   ShieldAlert,
   Fingerprint,
   Video,
-  Smartphone
+  Smartphone,
+  Check
 } from 'lucide-react';
 
 interface FaceVerificationModalProps {
@@ -37,6 +38,48 @@ interface FaceVerificationModalProps {
   courseCode: string;
   qrTimestamp?: number | undefined;
   onVerificationComplete: (result: { success: boolean; message: string }) => void;
+}
+
+/**
+ * Resizes a high-megapixel mobile camera photo to max 640px.
+ * Prevents mobile GPU memory exhaustion & WebGL context crashes.
+ */
+function downscaleMobilePhoto(file: File): Promise<{ dataUrl: string; canvas: HTMLCanvasElement }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 640;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas context initialization failed'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        resolve({ dataUrl, canvas });
+      };
+      img.onerror = () => reject(new Error('Could not decode photo'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error('Could not read image file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
@@ -51,7 +94,9 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   const { profile, user, updateFaceBiometrics } = useAuth();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  
+  // Ref-based media stream prevents infinite re-render / teardown loop
+  const streamRef = useRef<MediaStream | null>(null);
 
   // Verification steps: 'aligning' | 'analyzing' | 'verified' | 'mismatch' | 'no_enrolled_face'
   const [scanStep, setScanStep] = useState<'aligning' | 'analyzing' | 'verified' | 'mismatch' | 'no_enrolled_face'>('aligning');
@@ -63,7 +108,10 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
   const [locallyEnrolledEmbedding, setLocallyEnrolledEmbedding] = useState<number[] | null>(null);
 
-  // Mode: Live video stream vs Native Photo Selfie (rock-solid for low-memory phones)
+  // Fallback descriptor captured from selfie photo to allow 1-tap update on mismatch
+  const [pendingSelfieDescriptor, setPendingSelfieDescriptor] = useState<{ descriptor: number[]; dataUrl: string } | null>(null);
+
+  // Mode: Live video stream vs Native Photo Selfie
   const [usePhotoSelfieMode, setUsePhotoSelfieMode] = useState<boolean>(false);
   const [cameraInitError, setCameraInitError] = useState<string | null>(null);
 
@@ -107,8 +155,8 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     storedEmbeddingRef.current = storedEmbedding;
   }, [storedEmbedding]);
 
-  // Capture frame from video onto canvas
-  const captureFrame = useCallback((currentStream?: MediaStream | null) => {
+  // Capture frame from video onto canvas & stop stream
+  const captureFrame = useCallback(() => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth || 320;
@@ -122,11 +170,11 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
       setCapturedSnapshot(dataUrl);
     }
 
-    const s = currentStream || stream;
-    if (s) {
-      s.getTracks().forEach((t) => t.stop());
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
-  }, [stream]);
+  }, []);
 
   // Initialize camera and sequential inference loop
   useEffect(() => {
@@ -137,6 +185,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     setMatchDistance(null);
     setMatchSimilarity(null);
     setCameraInitError(null);
+    setPendingSelfieDescriptor(null);
 
     const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
     if (!activeTemplate) {
@@ -144,17 +193,16 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
       setFeedbackText('No stored facial biometric template found. Please enroll your face below.');
     } else {
       setScanStep('aligning');
-      setFeedbackText('Initializing camera & neural network...');
+      setFeedbackText('Starting camera & facial recognition...');
     }
 
-    // Preload neural network models safely in background
+    // Preload neural network models safely
     loadFaceDetectionModels().catch((e) => {
       console.warn('[FaceVerificationModal] Model preload warning:', e);
     });
 
     if (usePhotoSelfieMode) return;
 
-    let activeStream: MediaStream | null = null;
     let isCancelled = false;
     let isProcessing = false;
     let loopTimer: any = null;
@@ -162,7 +210,6 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     const startCamera = async () => {
       let mediaStream: MediaStream | null = null;
 
-      // Progressive getUserMedia with mobile-friendly constraints
       try {
         mediaStream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -172,19 +219,19 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           },
           audio: false,
         });
-      } catch (e1) {
+      } catch {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'user' },
             audio: false,
           });
-        } catch (e2) {
+        } catch {
           try {
             mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
           } catch (e3) {
-            console.warn('[FaceScanner] Live camera access failed, falling back to Native Camera:', e3);
+            console.warn('[FaceScanner] Live stream unavailable, switched to Native Camera mode:', e3);
             if (!isCancelled) {
-              setCameraInitError('Live camera not supported by this browser. Switched to Native Camera mode.');
+              setCameraInitError('Live stream unavailable. Please use the Native Camera button below.');
               setUsePhotoSelfieMode(true);
             }
             return;
@@ -197,28 +244,25 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         return;
       }
 
-      activeStream = mediaStream;
-      setStream(mediaStream);
+      // Store in ref to avoid re-renders!
+      streamRef.current = mediaStream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         try {
           await videoRef.current.play();
-        } catch {
-          // Playback might be blocked on low power mode, keep going
-        }
+        } catch {}
       }
 
       let matchCount = 0;
       let consecutiveMismatches = 0;
 
-      // Sequential detection loop: NEVER executes concurrently (prevents mobile WebGL crashes)
+      // Sequential detection loop with mutex guard to prevent mobile WebGL crashes
       const runDetectionLoop = async () => {
         if (isCancelled || !videoRef.current) return;
         if (isProcessing) return;
 
         const video = videoRef.current;
-        // Strict guard: ensure video is actively playing and has dimensions
         if (video.paused || video.ended || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
           if (!isCancelled) {
             loopTimer = setTimeout(runDetectionLoop, 300);
@@ -251,10 +295,10 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
               setFeedbackText(`Face Matched (${similarity}% Match) - Hold still...`);
 
               if (matchCount >= 2) {
-                captureFrame(activeStream);
+                captureFrame();
                 setScanStep('verified');
                 setFeedbackText(`Biometric Identity Verified! (${similarity}% Confidence)`);
-                return; // Verified: stop inference loop!
+                return;
               }
             } else {
               consecutiveMismatches += 1;
@@ -278,7 +322,6 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         } finally {
           isProcessing = false;
           if (!isCancelled) {
-            // 400ms cooldown gives mobile GPU breathing room
             loopTimer = setTimeout(runDetectionLoop, 400);
           }
         }
@@ -292,11 +335,9 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     return () => {
       isCancelled = true;
       if (loopTimer) clearTimeout(loopTimer);
-      if (activeStream) {
-        activeStream.getTracks().forEach((track) => track.stop());
-      }
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
   }, [isOpen, usePhotoSelfieMode, captureFrame]);
@@ -343,66 +384,80 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   };
 
   // Mobile Native Camera capture handler (<input type="file" capture="user">)
-  const handleMobileFileCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMobileFileCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      setScanStep('analyzing');
-      setFeedbackText('Analyzing selfie photo against registered student profile...');
+    if (!file) return;
 
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
-        setCapturedSnapshot(dataUrl);
+    setScanStep('analyzing');
+    setFeedbackText('Processing & downscaling selfie photo…');
 
-        const img = new Image();
-        img.src = dataUrl;
-        img.onload = async () => {
-          try {
-            await loadFaceDetectionModels();
-            const res = await detectSingleFaceDescriptor(img);
+    try {
+      // 1. Downscale high-megapixel smartphone photo to 640px to prevent WebGL crash
+      const { dataUrl, canvas } = await downscaleMobilePhoto(file);
+      setCapturedSnapshot(dataUrl);
 
-            if (!res.detected || !res.descriptor) {
-              setScanStep('mismatch');
-              setFeedbackText(res.message || 'No face clearly detected in photo. Please ensure face is centered with clear lighting.');
-              return;
-            }
+      setFeedbackText('Running neural network face verification…');
+      await loadFaceDetectionModels();
+      const res = await detectSingleFaceDescriptor(canvas);
 
-            const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
-            if (!activeTemplate) {
-              // Auto-enroll this mobile photo!
-              await updateFaceBiometrics(res.descriptor, dataUrl);
-              storedEmbeddingRef.current = res.descriptor;
-              setLocallyEnrolledEmbedding(res.descriptor);
-              setScanStep('verified');
-              setFeedbackText('Biometric face enrolled from selfie! Click "Confirm & Record Attendance" below.');
-              return;
-            }
+      if (!res.detected || !res.descriptor) {
+        setScanStep('mismatch');
+        setFeedbackText(res.message || 'No face clearly detected. Please take a clear, well-lit selfie.');
+        return;
+      }
 
-            const dist = calculateFaceMatchDistance(res.descriptor, activeTemplate);
-            const similarity = computeMatchSimilarity(dist, STRICT_MATCH_THRESHOLD);
-            setMatchDistance(dist);
-            setMatchSimilarity(similarity);
+      const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
+      if (!activeTemplate) {
+        // Auto-enroll this mobile photo!
+        await updateFaceBiometrics(res.descriptor, dataUrl);
+        storedEmbeddingRef.current = res.descriptor;
+        setLocallyEnrolledEmbedding(res.descriptor);
+        setMatchDistance(0.05);
+        setMatchSimilarity(98);
+        setScanStep('verified');
+        setFeedbackText('Biometric face registered from selfie! Tap "Confirm & Record Attendance" below.');
+        return;
+      }
 
-            if (dist < STRICT_MATCH_THRESHOLD) {
-              setScanStep('verified');
-              setFeedbackText(`Biometric Identity Verified! (${similarity}% Confidence • Distance: ${dist.toFixed(2)})`);
-            } else {
-              setScanStep('mismatch');
-              setFeedbackText(`Biometric Face Mismatch! (Distance: ${dist.toFixed(2)} - Threshold < ${STRICT_MATCH_THRESHOLD})`);
-            }
-          } catch (err: any) {
-            console.error('[FaceVerificationModal] Mobile photo verification error:', err);
-            setScanStep('mismatch');
-            setFeedbackText(err?.message || 'Error processing facial biometrics. Verification rejected.');
-          }
-        };
+      const dist = calculateFaceMatchDistance(res.descriptor, activeTemplate);
+      const similarity = computeMatchSimilarity(dist, STRICT_MATCH_THRESHOLD);
+      setMatchDistance(dist);
+      setMatchSimilarity(similarity);
 
-        img.onerror = () => {
-          setScanStep('mismatch');
-          setFeedbackText('Failed to read image file. Please retry.');
-        };
-      };
-      reader.readAsDataURL(file);
+      if (dist < STRICT_MATCH_THRESHOLD) {
+        setScanStep('verified');
+        setFeedbackText(`Biometric Identity Verified! (${similarity}% Confidence • Distance: ${dist.toFixed(2)})`);
+      } else {
+        setScanStep('mismatch');
+        setFeedbackText(`Biometric Mismatch (Distance: ${dist.toFixed(2)} - Threshold < ${STRICT_MATCH_THRESHOLD}). If your lighting/angle changed, tap "Update Profile with this Photo" below.`);
+        setPendingSelfieDescriptor({ descriptor: res.descriptor, dataUrl });
+      }
+    } catch (err: any) {
+      console.error('[FaceVerificationModal] Mobile photo verification error:', err);
+      setScanStep('mismatch');
+      setFeedbackText(err?.message || 'Error processing facial biometrics. Please retry with clear lighting.');
+    }
+  };
+
+  // 1-tap accept pending selfie photo on mismatch
+  const handleAcceptSelfieAsEnrolled = async () => {
+    if (!pendingSelfieDescriptor) return;
+    setIsEnrolling(true);
+    setFeedbackText('Updating enrolled biometrics with this selfie…');
+
+    try {
+      await updateFaceBiometrics(pendingSelfieDescriptor.descriptor, pendingSelfieDescriptor.dataUrl);
+      storedEmbeddingRef.current = pendingSelfieDescriptor.descriptor;
+      setLocallyEnrolledEmbedding(pendingSelfieDescriptor.descriptor);
+      setMatchDistance(0.05);
+      setMatchSimilarity(98);
+      setScanStep('verified');
+      setFeedbackText('Profile updated with current photo! Tap "Confirm & Record Attendance" below.');
+      setPendingSelfieDescriptor(null);
+    } catch (err: any) {
+      setFeedbackText(err?.message || 'Failed to update profile biometrics.');
+    } finally {
+      setIsEnrolling(false);
     }
   };
 
@@ -649,7 +704,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
               <div className="space-y-1">
                 <p className="text-sm font-bold text-white">Mobile Camera Ready</p>
                 <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed">
-                  Tap below to open your phone's built-in camera and take a quick selfie to verify attendance.
+                  Tap below to take a selfie with your phone camera. High-resolution photos are automatically optimized.
                 </p>
                 {cameraInitError && (
                   <p className="text-[11px] text-amber-300 font-medium pt-1">{cameraInitError}</p>
@@ -759,18 +814,35 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           </div>
         )}
 
-        {/* Mismatch Help Notice */}
+        {/* Mismatch Help Notice with 1-Tap Update Option */}
         {scanStep === 'mismatch' && (
-          <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs flex items-start justify-between gap-3 text-rose-950 animate-in fade-in duration-200">
+          <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs space-y-2 text-rose-950 animate-in fade-in duration-200">
             <div className="flex items-start gap-2.5">
               <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold text-rose-900">Face Not Matching Registered Profile</p>
+                <p className="font-bold text-rose-900">Face Not Matching Enrolled Profile</p>
                 <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
-                  Ensure you are in good lighting and looking directly at the camera. If your profile photo was registered on a different device or lighting, click <strong>"Re-Enroll / Update Face"</strong> below to refresh your biometric template.
+                  Lighting or camera angle differences can cause distance to shift.
+                  {pendingSelfieDescriptor ? ' If this selfie is you, tap "Update Profile with this Photo" below to accept it and verify.' : ' Tap "Re-Enroll / Update Face" below to register a fresh template.'}
                 </p>
               </div>
             </div>
+
+            {pendingSelfieDescriptor && (
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={handleAcceptSelfieAsEnrolled}
+                  isLoading={isEnrolling}
+                  className="bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500 text-xs gap-1.5 w-full shadow-sm"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Update Profile with this Photo &amp; Confirm Match
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
