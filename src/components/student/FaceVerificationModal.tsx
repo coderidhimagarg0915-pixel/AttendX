@@ -4,6 +4,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { checkCampusGeofence, GeofenceResult } from '@/lib/geofence';
 import {
   loadFaceDetectionModels,
   detectSingleFaceDescriptor,
@@ -20,6 +21,7 @@ import {
   ScanFace, 
   Sparkles, 
   AlertCircle, 
+  AlertTriangle,
   UserCheck, 
   UserX, 
   User, 
@@ -27,7 +29,8 @@ import {
   Fingerprint,
   Video,
   Smartphone,
-  Check
+  Check,
+  MapPin
 } from 'lucide-react';
 
 interface FaceVerificationModalProps {
@@ -115,6 +118,9 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
   const [usePhotoSelfieMode, setUsePhotoSelfieMode] = useState<boolean>(false);
   const [cameraInitError, setCameraInitError] = useState<string | null>(null);
 
+  // GPS Geofence Check (Anti-Proxy Option B)
+  const [geoResult, setGeoResult] = useState<GeofenceResult | null>(null);
+
   const studentId = user?.id || profile?.id;
   const studentName = profile?.full_name || user?.email?.split('@')[0] || 'Enrolled Student';
   
@@ -186,6 +192,12 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
     setMatchSimilarity(null);
     setCameraInitError(null);
     setPendingSelfieDescriptor(null);
+    setGeoResult(null);
+
+    // Run Campus Geofence validation in parallel
+    checkCampusGeofence().then((res) => {
+      setGeoResult(res);
+    });
 
     const activeTemplate = storedEmbeddingRef.current || storedEmbedding;
     if (!activeTemplate) {
@@ -487,6 +499,29 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         if (active) targetSessionId = active.id;
       }
 
+      // Determine check-in origin & anti-proxy flags
+      let methodString = 'Live QR + Biometric';
+      const isRemote = geoResult && geoResult.permissionGranted && !geoResult.isWithinCampus;
+      const distKm = geoResult?.distanceMeters ? (geoResult.distanceMeters / 1000).toFixed(1) : null;
+
+      if (qrTimestamp) {
+        if (isRemote) {
+          methodString = `Live QR + Remote (${distKm}km)`;
+        } else if (geoResult?.isWithinCampus && geoResult.permissionGranted) {
+          methodString = 'Live QR + Campus Geofence';
+        } else {
+          methodString = 'Live QR + Biometric';
+        }
+      } else {
+        if (isRemote) {
+          methodString = `Manual OTP + Remote (${distKm}km)`;
+        } else if (geoResult?.isWithinCampus && geoResult.permissionGranted) {
+          methodString = 'Manual OTP + In-Campus';
+        } else {
+          methodString = 'Manual OTP (Unverified QR)';
+        }
+      }
+
       if (isSupabaseConfigured && targetSessionId) {
         let { data, error } = await (supabase as any).rpc('submit_student_attendance', {
           p_session_id: targetSessionId,
@@ -516,10 +551,26 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         }
 
         if (!error && data?.success) {
+          // Record method & geofence metadata in attendance_records
+          try {
+            await (supabase as any).rpc('record_checkin_metadata', {
+              p_session_id: targetSessionId,
+              p_method: methodString,
+            });
+          } catch {
+            try {
+              await (supabase as any)
+                .from('attendance_records')
+                .update({ user_agent: methodString })
+                .eq('session_id', targetSessionId)
+                .eq('student_id', user?.id || profile?.id);
+            } catch {}
+          }
+
           setIsSubmitting(false);
           onVerificationComplete({
             success: true,
-            message: `Attendance verified via Biometric Face Match for ${courseCode || sessionCode}!`,
+            message: `Attendance verified via Biometric Face Match for ${courseCode || sessionCode}! (${methodString})`,
           });
           onClose();
           return;
@@ -550,7 +601,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         setIsSubmitting(false);
         onVerificationComplete({
           success: true,
-          message: `Biometric face verified against profile for session ${sessionCode}!`,
+          message: `Biometric face verified against profile for session ${sessionCode}! (${methodString})`,
         });
         onClose();
       }, 700);
@@ -611,10 +662,15 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
           </div>
 
           <div className="text-right shrink-0">
-            {qrTimestamp && (
+            {qrTimestamp ? (
               <span className="inline-flex items-center gap-1 text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 text-[10px] block mb-1">
                 <Sparkles className="w-3 h-3 text-indigo-500" />
                 Live QR
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-800 font-semibold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-300 text-[10px] block mb-1">
+                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                Manual OTP
               </span>
             )}
             <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 text-[10px]">
@@ -623,6 +679,59 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Anti-Proxy Location & Campus Geofence Banner */}
+        {geoResult && (
+          <div
+            className={`px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 animate-in fade-in duration-200 ${
+              geoResult.permissionGranted && geoResult.isWithinCampus
+                ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                : geoResult.permissionGranted && !geoResult.isWithinCampus
+                ? 'bg-amber-50 border-amber-300 text-amber-950 font-medium'
+                : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <MapPin
+                className={`w-4 h-4 shrink-0 ${
+                  geoResult.permissionGranted && geoResult.isWithinCampus
+                    ? 'text-emerald-600'
+                    : geoResult.permissionGranted && !geoResult.isWithinCampus
+                    ? 'text-amber-600'
+                    : 'text-slate-400'
+                }`}
+              />
+              <div>
+                <span className="font-semibold">
+                  {geoResult.permissionGranted && geoResult.isWithinCampus
+                    ? 'MNIT Campus Geofence: In Perimeter'
+                    : geoResult.permissionGranted && !geoResult.isWithinCampus
+                    ? 'Geofence Alert: Remote Location Detected'
+                    : 'Campus Geofence: Location Permission Not Enabled'}
+                </span>
+                <span className="text-[11px] block text-slate-500">
+                  {geoResult.statusText}
+                  {geoResult.distanceMeters !== null && !geoResult.isWithinCampus && ' • Flagged on Instructor Screen'}
+                </span>
+              </div>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                geoResult.permissionGranted && geoResult.isWithinCampus
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  : geoResult.permissionGranted && !geoResult.isWithinCampus
+                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                  : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {geoResult.permissionGranted && geoResult.isWithinCampus
+                ? 'In-Campus'
+                : geoResult.permissionGranted && !geoResult.isWithinCampus
+                ? 'Remote Flag'
+                : 'GPS Off'}
+            </span>
+          </div>
+        )}
 
         {/* Missing Biometrics Alert */}
         {!storedEmbedding && (

@@ -442,6 +442,7 @@ export const sessionService = {
           verification_state,
           verified_at,
           created_at,
+          user_agent,
           profiles (
             id,
             full_name,
@@ -466,7 +467,7 @@ export const sessionService = {
           hour: '2-digit',
           minute: '2-digit',
         }),
-        method: 'Dynamic OTP + Biometric',
+        method: row.user_agent || (row.verification_state === 'verified' ? 'Live QR + Campus Geofence' : 'Manual OTP'),
       }));
     } catch {
       return [];

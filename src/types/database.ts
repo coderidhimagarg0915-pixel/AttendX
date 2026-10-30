@@ -193,6 +193,13 @@ export interface Database {
         };
         Returns: Json;
       };
+      record_checkin_metadata: {
+        Args: {
+          p_session_id: string;
+          p_method: string;
+        };
+        Returns: Json;
+      };
       current_user_role: {
         Args: Record<PropertyKey, never>;
         Returns: UserRole;

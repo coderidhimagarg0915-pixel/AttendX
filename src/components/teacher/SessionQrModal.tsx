@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { QRCodeSVG } from 'qrcode.react';
-import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles } from 'lucide-react';
+import { QrCode, Copy, Check, ExternalLink, RefreshCw, Shield, Sparkles, Lock, Unlock } from 'lucide-react';
 import type { AttendanceSessionData } from '@/services/sessionService';
 import { generateSessionCode } from '@/services/sessionService';
 
@@ -35,6 +35,7 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
   const [displayOtp, setDisplayOtp] = useState(session?.code || '');
   const [displayTimestamp, setDisplayTimestamp] = useState(Date.now());
   const [secondsUntilRotation, setSecondsUntilRotation] = useState(ROTATION_INTERVAL_SECONDS);
+  const [isStrictQrOnly, setIsStrictQrOnly] = useState(false);
 
   // Always use the live deployed origin (e.g. https://attend-x-lac.vercel.app)
   const currentHost = typeof window !== 'undefined' ? window.location.origin : '';
@@ -163,35 +164,63 @@ export const SessionQrModal: React.FC<SessionQrModalProps> = ({
             />
           </div>
 
-          {/* OTP display */}
-          <div className="mt-5 text-center">
-            <span className="text-[11px] text-slate-400 uppercase tracking-widest font-semibold block mb-1">
-              Alternative Check-In OTP
-            </span>
-            <span className="text-3xl sm:text-4xl font-mono font-black tracking-widest text-emerald-400 select-all">
-              {displayOtp}
-            </span>
-          </div>
+          {/* Anti-Proxy: Conditional OTP display or Strict QR-Only banner */}
+          {isStrictQrOnly ? (
+            <div className="mt-5 p-4 bg-rose-950/70 border border-rose-800/80 rounded-2xl text-center max-w-sm mx-auto shadow-inner animate-in fade-in duration-200">
+              <div className="flex items-center justify-center gap-1.5 text-rose-300 text-xs font-bold uppercase tracking-wider">
+                <Lock className="w-4 h-4 text-rose-400" />
+                Strict QR-Only Mode Active
+              </div>
+              <p className="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
+                Text OTP is hidden from the projector. Only direct optical scans of this rotating QR code are accepted, preventing absent peers from checking in remotely.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5 text-center">
+              <span className="text-[11px] text-slate-400 uppercase tracking-widest font-semibold block mb-1">
+                Alternative Check-In OTP
+              </span>
+              <span className="text-3xl sm:text-4xl font-mono font-black tracking-widest text-emerald-400 select-all">
+                {displayOtp}
+              </span>
+            </div>
+          )}
 
           {/* Action Bar */}
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
             <button
-              onClick={handleCopy}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors border border-white/10"
+              type="button"
+              onClick={() => setIsStrictQrOnly(!isStrictQrOnly)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all border shadow-sm ${
+                isStrictQrOnly
+                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500'
+                  : 'bg-white/10 hover:bg-white/20 text-slate-200 border-white/20'
+              }`}
+              title="Hide text OTP from screen to force optical QR scan"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copied!' : 'Copy Code'}
+              {isStrictQrOnly ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5 text-slate-400" />}
+              {isStrictQrOnly ? 'Strict QR-Only (Active)' : 'Enable Strict QR-Only'}
             </button>
+
+            {!isStrictQrOnly && (
+              <button
+                onClick={handleCopy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors border border-white/10"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? 'Copied!' : 'Copy Code'}
+              </button>
+            )}
 
             <button
               onClick={handleManualRotate}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors border border-white/10"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 transition-colors border border-white/10"
             >
               <RefreshCw className="w-3.5 h-3.5 text-brand-400" />
               Force Rotate
             </button>
 
-            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-mono font-semibold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono font-semibold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30">
               ⏳ Closes: {timeLeftFormatted}
             </span>
           </div>

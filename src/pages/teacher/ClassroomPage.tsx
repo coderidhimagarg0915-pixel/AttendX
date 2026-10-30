@@ -13,7 +13,7 @@ import type { AttendanceStatus } from '@/types/attendance';
 import {
   Users, CheckCircle, Play, Square, Search, RefreshCw, QrCode, Download,
   ShieldCheck, UserCheck, ChevronLeft, UserPlus, Copy, Check, History,
-  TrendingDown, BookOpen, CalendarDays, Plus
+  TrendingDown, BookOpen, CalendarDays, Plus, AlertTriangle
 } from 'lucide-react';
 
 const statusVariant = (s: string) => {
@@ -194,9 +194,19 @@ export const ClassroomPage: React.FC = () => {
   const quorumPct = enrolled > 0 ? Math.round((verified / enrolled) * 100) : 0;
   const atRiskCount = enrolledStudents.filter((s) => s.attendancePercent < 75).length;
 
+  // Anti-Proxy: attendees who bypassed live QR or checked in outside campus geofence
+  const flaggedAttendees = roster.filter(
+    (s) => s.method?.toLowerCase().includes('manual') || s.method?.toLowerCase().includes('remote')
+  );
+  const flaggedCount = flaggedAttendees.length;
+
   const filteredRoster = roster.filter((s) => {
     const q = searchFilter.toLowerCase();
-    const matchSearch = s.name.toLowerCase().includes(q) || s.roll.toLowerCase().includes(q) || s.email.toLowerCase().includes(q);
+    const matchSearch =
+      s.name.toLowerCase().includes(q) ||
+      s.roll.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      (s.method && s.method.toLowerCase().includes(q));
     const matchStatus = statusTab === 'all' || s.status === statusTab;
     return matchSearch && matchStatus;
   });
@@ -324,12 +334,15 @@ export const ClassroomPage: React.FC = () => {
               </Card>
 
               {/* Live Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className={`grid grid-cols-2 sm:grid-cols-4 ${flaggedCount > 0 ? 'lg:grid-cols-5' : ''} gap-4`}>
                 {[
                   { label: 'Enrolled', value: enrolled, color: 'text-slate-900' },
                   { label: 'Present', value: presentCount, color: 'text-emerald-700' },
                   { label: 'Late', value: lateCount, color: 'text-amber-700' },
                   { label: 'Quorum', value: `${quorumPct}%`, color: quorumPct >= 75 ? 'text-emerald-700' : 'text-rose-600' },
+                  ...(flaggedCount > 0
+                    ? [{ label: 'Proxy Flags (OTP/Remote)', value: flaggedCount, color: 'text-amber-600 font-black' }]
+                    : []),
                 ].map(({ label, value, color }) => (
                   <Card key={label} className="text-center py-4">
                     <div className={`text-3xl font-black ${color}`}>{value}</div>
@@ -337,6 +350,39 @@ export const ClassroomPage: React.FC = () => {
                   </Card>
                 ))}
               </div>
+
+              {/* Anti-Proxy Alert Banner */}
+              {flaggedCount > 0 && (
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-950 shadow-sm animate-in fade-in duration-300">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm">
+                          Anti-Proxy Alert: {flaggedCount} Check-In{flaggedCount > 1 ? 's' : ''} Flagged
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-200 text-amber-900 border border-amber-400">
+                          Review Required
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-900 mt-0.5 leading-relaxed">
+                        These students verified attendance via manual code entry without scanning the live classroom QR, or were detected outside the MNIT campus geofence. Click <strong>Override</strong> to mark them absent if proxy is suspected.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setSearchFilter(searchFilter === 'Manual' ? '' : 'Manual')}
+                      className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-xs"
+                    >
+                      {searchFilter === 'Manual' ? 'Show All Students' : `Filter Flagged (${flaggedCount})`}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Live Roster */}
               <Card padding="none">
@@ -395,10 +441,22 @@ export const ClassroomPage: React.FC = () => {
                             </td>
                             <td className="px-5 py-3 text-xs text-slate-500">{st.timestamp}</td>
                             <td className="px-5 py-3">
-                              <span className="flex items-center gap-1 text-xs text-slate-600">
-                                <ShieldCheck className="w-3.5 h-3.5 text-brand-500" />
-                                {st.method}
-                              </span>
+                              {st.method?.toLowerCase().includes('manual') || st.method?.toLowerCase().includes('remote') ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-950 border border-amber-300 shadow-xs">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>{st.method}</span>
+                                </span>
+                              ) : st.method?.toLowerCase().includes('geofence') || st.method?.toLowerCase().includes('live qr') ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>{st.method}</span>
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-slate-600">
+                                  <ShieldCheck className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                                  <span>{st.method}</span>
+                                </span>
+                              )}
                             </td>
                             <td className="px-5 py-3 text-right">
                               <Button variant="ghost" size="sm" onClick={() => setSelectedStudentForOverride(st)} className="text-xs font-semibold text-brand-600 hover:text-brand-800">

@@ -231,6 +231,22 @@ export const StudentDashboard: React.FC = () => {
         setIsQuickSubmitting(false);
 
         if (!error && data?.success) {
+          // Record method as Manual OTP (No Face Biometrics)
+          try {
+            await (supabase as any).rpc('record_checkin_metadata', {
+              p_session_id: effectiveSessionId,
+              p_method: 'Manual OTP (No Face Biometrics)',
+            });
+          } catch {
+            try {
+              await (supabase as any)
+                .from('attendance_records')
+                .update({ user_agent: 'Manual OTP (No Face Biometrics)' })
+                .eq('session_id', effectiveSessionId)
+                .eq('student_id', user?.id || profile?.id);
+            } catch {}
+          }
+
           setSubmissionFeedback({
             status: 'success',
             message: 'Attendance recorded successfully via code verification!',
