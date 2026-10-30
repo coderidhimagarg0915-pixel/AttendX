@@ -551,6 +551,13 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
         }
 
         if (!error && data?.success) {
+          const currentStudentId = user?.id || profile?.id;
+          if (typeof window !== 'undefined' && targetSessionId && currentStudentId) {
+            try {
+              localStorage.setItem(`attendx_method_${targetSessionId}_${currentStudentId}`, methodString);
+            } catch {}
+          }
+
           // Record method & geofence metadata in attendance_records
           try {
             await (supabase as any).rpc('record_checkin_metadata', {
@@ -563,7 +570,7 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
                 .from('attendance_records')
                 .update({ user_agent: methodString })
                 .eq('session_id', targetSessionId)
-                .eq('student_id', user?.id || profile?.id);
+                .eq('student_id', currentStudentId);
             } catch {}
           }
 
@@ -597,6 +604,12 @@ export const FaceVerificationModal: React.FC<FaceVerificationModalProps> = ({
       }
 
       // Offline / demo fallback
+      const currentStudentId = user?.id || profile?.id;
+      if (typeof window !== 'undefined' && targetSessionId && currentStudentId) {
+        try {
+          localStorage.setItem(`attendx_method_${targetSessionId}_${currentStudentId}`, methodString);
+        } catch {}
+      }
       setTimeout(() => {
         setIsSubmitting(false);
         onVerificationComplete({

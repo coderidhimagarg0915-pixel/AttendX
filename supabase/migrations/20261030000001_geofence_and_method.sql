@@ -46,3 +46,4 @@ BEGIN
         WITH CHECK (student_id = (SELECT auth.uid()));
     END IF;
 END $$;
+

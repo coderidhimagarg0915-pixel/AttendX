@@ -43,6 +43,7 @@ export const StudentDashboard: React.FC = () => {
   const [effectiveSessionId, setEffectiveSessionId] = useState(paramSessionId);
   const [effectiveCourseCode, setEffectiveCourseCode] = useState(paramCourse);
   const [validQrTimestamp, setValidQrTimestamp] = useState<number | null>(null);
+  const [isManualOtpEntry, setIsManualOtpEntry] = useState(!paramCode || !paramTs);
   const [formError, setFormError] = useState<string | null>(null);
   const [isQuickSubmitting, setIsQuickSubmitting] = useState(false);
   const [qrExpirationError, setQrExpirationError] = useState<{
@@ -115,45 +116,36 @@ export const StudentDashboard: React.FC = () => {
     let activeCourse = paramCourse;
     let activeTs = paramTs;
 
-    // Check localStorage fallback if URL parameters were stripped during login redirect
+    // Check localStorage fallback only if immediately redirected from login (within 60s)
     if (!activeCode && typeof window !== 'undefined') {
       try {
         const raw = localStorage.getItem('attendx_pending_checkin');
         if (raw) {
           const parsed = JSON.parse(raw);
-          if (parsed?.code && Date.now() - (parsed.storedAt || 0) < 600000) {
+          if (parsed?.code && Date.now() - (parsed.storedAt || 0) < 60000) {
             activeCode = parsed.code;
             activeSessionId = parsed.sessionId || '';
             activeCourse = parsed.course || '';
             activeTs = parsed.ts || '';
           }
+          // Immediately consume it so subsequent manual OTP tests start with clean state
+          localStorage.removeItem('attendx_pending_checkin');
         }
       } catch {}
     }
 
-    if (!activeCode) return;
+    if (!activeCode) {
+      setIsManualOtpEntry(true);
+      setValidQrTimestamp(null);
+      return;
+    }
 
     setSessionCode(activeCode);
     setEffectiveSessionId(activeSessionId);
     setEffectiveCourseCode(activeCourse);
 
-    // Persist in localStorage
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem(
-          'attendx_pending_checkin',
-          JSON.stringify({
-            code: activeCode,
-            sessionId: activeSessionId,
-            course: activeCourse,
-            ts: activeTs,
-            storedAt: Date.now(),
-          })
-        );
-      } catch {}
-    }
-
     if (activeTs) {
+      setIsManualOtpEntry(false);
       const qrTimestamp = parseInt(activeTs, 10);
       const isTimestampValid = !isNaN(qrTimestamp) && qrTimestamp > 0;
       const ageMs = isTimestampValid ? Date.now() - qrTimestamp : 0;
@@ -168,6 +160,7 @@ export const StudentDashboard: React.FC = () => {
           code: activeCode,
         });
         setValidQrTimestamp(null);
+        setIsManualOtpEntry(true);
         // Automatically open face modal so student proceeds to biometric scan
         setIsFaceModalOpen(true);
         return;
@@ -177,6 +170,7 @@ export const StudentDashboard: React.FC = () => {
       setQrExpirationError(null);
       setIsFaceModalOpen(true);
     } else {
+      setIsManualOtpEntry(true);
       setValidQrTimestamp(null);
       setQrExpirationError(null);
       setIsFaceModalOpen(true);
@@ -188,6 +182,15 @@ export const StudentDashboard: React.FC = () => {
     setFormError(null);
     setSubmissionFeedback(null);
     setQrExpirationError(null);
+
+    // If sessionCode was typed or edited manually, enforce manual OTP
+    if (isManualOtpEntry || !paramTs || sessionCode.trim().toUpperCase() !== paramCode.trim().toUpperCase()) {
+      setIsManualOtpEntry(true);
+      setValidQrTimestamp(null);
+      if (typeof window !== 'undefined') {
+        try { localStorage.removeItem('attendx_pending_checkin'); } catch {}
+      }
+    }
 
     // Validate using Zod schema
     const result = StudentCheckInSchema.safeParse({ sessionCode: sessionCode.trim() });
@@ -232,6 +235,12 @@ export const StudentDashboard: React.FC = () => {
 
         if (!error && data?.success) {
           // Record method as Manual OTP (No Face Biometrics)
+          const currentStudentId = user?.id || profile?.id;
+          if (typeof window !== 'undefined' && effectiveSessionId && currentStudentId) {
+            try {
+              localStorage.setItem(`attendx_method_${effectiveSessionId}_${currentStudentId}`, 'Manual OTP (No Face Biometrics)');
+            } catch {}
+          }
           try {
             await (supabase as any).rpc('record_checkin_metadata', {
               p_session_id: effectiveSessionId,
@@ -243,7 +252,7 @@ export const StudentDashboard: React.FC = () => {
                 .from('attendance_records')
                 .update({ user_agent: 'Manual OTP (No Face Biometrics)' })
                 .eq('session_id', effectiveSessionId)
-                .eq('student_id', user?.id || profile?.id);
+                .eq('student_id', currentStudentId);
             } catch {}
           }
 
@@ -512,6 +521,11 @@ export const StudentDashboard: React.FC = () => {
                   value={sessionCode}
                   onChange={(e) => {
                     setSessionCode(e.target.value.toUpperCase());
+                    setIsManualOtpEntry(true);
+                    setValidQrTimestamp(null);
+                    if (typeof window !== 'undefined') {
+                      try { localStorage.removeItem('attendx_pending_checkin'); } catch {}
+                    }
                     if (formError) setFormError(null);
                     if (qrExpirationError) setQrExpirationError(null);
                   }}
@@ -867,7 +881,7 @@ export const StudentDashboard: React.FC = () => {
         sessionId={effectiveSessionId}
         sessionCode={sessionCode}
         courseCode={effectiveCourseCode}
-        qrTimestamp={validQrTimestamp || undefined}
+        qrTimestamp={!isManualOtpEntry && sessionCode.trim().toUpperCase() === paramCode.trim().toUpperCase() && validQrTimestamp ? validQrTimestamp : undefined}
         onVerificationComplete={handleVerificationComplete}
       />
     </div>

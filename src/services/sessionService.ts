@@ -455,20 +455,29 @@ export const sessionService = {
 
       if (error || !data) return [];
 
-      return (data as any[]).map((row) => ({
-        id: row.id,
-        studentId: row.student_id,
-        roll: row.profiles?.institution_id || row.student_id.slice(0, 8).toUpperCase(),
-        name: row.profiles?.full_name || 'Student',
-        email: row.profiles?.email || '',
-        status: row.status as AttendanceStatus,
-        verificationState: row.verification_state,
-        timestamp: new Date(row.verified_at || row.created_at).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        method: row.user_agent || (row.verification_state === 'verified' ? 'Live QR + Campus Geofence' : 'Manual OTP'),
-      }));
+      return (data as any[]).map((row) => {
+        let recordedMethod = row.user_agent;
+        if (!recordedMethod && typeof window !== 'undefined') {
+          try {
+            recordedMethod = localStorage.getItem(`attendx_method_${sessionId}_${row.student_id}`) || null;
+          } catch {}
+        }
+
+        return {
+          id: row.id,
+          studentId: row.student_id,
+          roll: row.profiles?.institution_id || row.student_id.slice(0, 8).toUpperCase(),
+          name: row.profiles?.full_name || 'Student',
+          email: row.profiles?.email || '',
+          status: row.status as AttendanceStatus,
+          verificationState: row.verification_state,
+          timestamp: new Date(row.verified_at || row.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          method: recordedMethod || 'Manual OTP (Unverified QR)',
+        };
+      });
     } catch {
       return [];
     }
