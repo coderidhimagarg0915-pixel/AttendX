@@ -24,7 +24,6 @@ export async function loadFaceDetectionModels(): Promise<void> {
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
         faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
         faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
       ]);
       modelsLoaded = true;
@@ -59,33 +58,32 @@ export async function detectSingleFaceDescriptor(
     await loadFaceDetectionModels();
   }
 
-  // Detect ALL faces to prevent proxy spoofing (e.g. holding a photo while student is present)
+  // Safety guard for video elements: avoid passing uninitialized or paused video into WebGL
+  if (typeof HTMLVideoElement !== 'undefined' && input instanceof HTMLVideoElement) {
+    if (input.videoWidth === 0 || input.videoHeight === 0 || input.paused || input.readyState < 2) {
+      return {
+        detected: false,
+        message: 'Camera starting up... please hold still.',
+      };
+    }
+  }
+
+  // Detect faces with mobile-optimized 224px input size to prevent memory pressure
   let detections: any[];
   try {
     detections = await faceapi
       .detectAllFaces(
         input,
-        new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })
+        new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.35 })
       )
       .withFaceLandmarks(false)
       .withFaceDescriptors();
-  } catch {
-    // Fallback with tiny landmarks if standard landmark net encounters format issues
-    try {
-      detections = await faceapi
-        .detectAllFaces(
-          input,
-          new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.35 })
-        )
-        .withFaceLandmarks(true)
-        .withFaceDescriptors();
-    } catch (err) {
-      console.error('[FaceBiometrics] Face detection error:', err);
-      return {
-        detected: false,
-        message: 'Could not process video frame. Ensure camera is unobstructed.',
-      };
-    }
+  } catch (err) {
+    console.error('[FaceBiometrics] Face detection error:', err);
+    return {
+      detected: false,
+      message: 'Processing camera frame... please hold still.',
+    };
   }
 
   if (!detections || detections.length === 0) {
@@ -134,7 +132,7 @@ export async function detectSingleFaceDescriptor(
     };
   }
 
-  if (coverage > 0.90) {
+  if (coverage > 0.92) {
     return {
       detected: false,
       message: 'Face is too close. Please move slightly back from the camera.',

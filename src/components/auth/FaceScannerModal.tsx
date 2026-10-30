@@ -20,7 +20,7 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loopTimeoutRef = useRef<any>(null);
 
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -31,9 +31,9 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
 
   // Stop video stream helper
   const stopStream = useCallback(() => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
+    if (loopTimeoutRef.current) {
+      clearTimeout(loopTimeoutRef.current);
+      loopTimeoutRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -49,34 +49,65 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
     setIsFaceAligned(false);
     setCurrentDescriptor(null);
 
+    let isCancelled = false;
+    let isProcessing = false;
+
     try {
       await loadFaceDetectionModels();
       setIsLoadingModels(false);
-      setDetectionStatus('Requesting webcam access…');
+      setDetectionStatus('Requesting camera access…');
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user',
-        },
-        audio: false,
-      });
+      let stream: MediaStream | null = null;
+
+      // Progressive getUserMedia with mobile-friendly constraints
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 480 },
+            height: { ideal: 640 },
+          },
+          audio: false,
+        });
+      } catch {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user' },
+            audio: false,
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        }
+      }
 
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch {}
       }
 
       setDetectionStatus('Position your face inside the oval guide');
 
-      // Detection loop
-      scanIntervalRef.current = setInterval(async () => {
-        if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return;
+      // Sequential detection loop with mutex guard to prevent mobile WebGL crashes
+      const runDetection = async () => {
+        if (isCancelled || !videoRef.current) return;
+        if (isProcessing) return;
 
+        const video = videoRef.current;
+        if (video.paused || video.ended || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+          if (!isCancelled) {
+            loopTimeoutRef.current = setTimeout(runDetection, 300);
+          }
+          return;
+        }
+
+        isProcessing = true;
         try {
-          const result = await detectSingleFaceDescriptor(videoRef.current);
+          const result = await detectSingleFaceDescriptor(video);
+          if (isCancelled) return;
+
           setDetectionStatus(result.message);
           setIsFaceAligned(result.detected);
           if (result.detected && result.descriptor) {
@@ -86,14 +117,21 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
           }
         } catch (scanErr) {
           console.warn('[FaceScanLoop] Frame detection error:', scanErr);
+        } finally {
+          isProcessing = false;
+          if (!isCancelled) {
+            loopTimeoutRef.current = setTimeout(runDetection, 350);
+          }
         }
-      }, 350);
+      };
+
+      loopTimeoutRef.current = setTimeout(runDetection, 600);
     } catch (err: unknown) {
       setIsLoadingModels(false);
       const errorMessage =
         err instanceof Error && err.name === 'NotAllowedError'
           ? 'Camera permission was denied. Please allow camera access in your browser settings.'
-          : 'Could not initialize camera or face models. Please ensure your webcam is connected.';
+          : 'Could not initialize camera or face models. Please ensure your camera is connected.';
       setCameraError(errorMessage);
     }
   }, []);
@@ -167,8 +205,9 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
         <div className="relative bg-slate-950 aspect-[4/3] flex items-center justify-center overflow-hidden">
           <video
             ref={videoRef}
-            muted
+            autoPlay
             playsInline
+            muted
             className="w-full h-full object-cover transform scale-x-[-1]"
           />
 
@@ -251,15 +290,17 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
               type="button"
               variant="primary"
               size="sm"
+              onClick={handleCapture}
               disabled={!isFaceAligned || !currentDescriptor || isCapturing}
               isLoading={isCapturing}
-              onClick={handleCapture}
-              className={`flex-1 sm:flex-initial gap-1.5 ${
-                isFaceAligned ? 'bg-emerald-600 hover:bg-emerald-700' : ''
+              className={`flex-1 sm:flex-initial gap-1.5 font-semibold ${
+                isFaceAligned
+                  ? 'bg-emerald-600 hover:bg-emerald-700 focus:ring-emerald-500 shadow-md'
+                  : 'bg-slate-300 text-slate-500 cursor-not-allowed'
               }`}
             >
-              <Camera className="w-4 h-4" />
-              <span>Capture Face</span>
+              <CheckCircle2 className="w-4 h-4" />
+              Capture &amp; Enroll Face
             </Button>
           </div>
         </div>
@@ -267,4 +308,3 @@ export const FaceScannerModal: React.FC<FaceScannerModalProps> = ({
     </div>
   );
 };
-
